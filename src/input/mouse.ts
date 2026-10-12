@@ -7,6 +7,7 @@ const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(mi
  * 마우스 = 목표 무게중심. 화면 방향 그대로다(아래 = 경사 아래, 위 = 경사 위, 좌우 = 좌우).
  * 몸이 돌아가도 화면 기준이 유지되도록 read() 에서 몸 기준으로 변환해 넘긴다.
  * - 웅크린 채 우클릭 드래그 좌우 / 휠: 샤빗 토크 감기(yaw). 웅크리는 동안은 줄지 않고, 점프하는 순간 보드에 실린다
+ * - 웅크린 채 우클릭 드래그 위/아래: 플립 토크 감기(flip). 위 = 킥플립, 아래 = 힐플립. 대각선이면 샤빗과 같이(배리얼)
  * - Shift + 우클릭 드래그 / Shift + 휠: 몸 돌리기(bodyYaw, 보드도 같이)
  * - 좌클릭 누름: 웅크림, 뗌: pop
  * 입력이 없으면 목표 무게중심이 중앙으로 천천히 돌아온다.
@@ -14,6 +15,7 @@ const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(mi
 export class MouseInput implements InputSource {
   private cop = { x: 0, y: 0 };
   private yaw = 0;
+  private flip = 0;
   private bodyYaw = 0;
   private crouch = 0;
   private crouching = false;
@@ -52,7 +54,10 @@ export class MouseInput implements InputSource {
     this.cop.x *= k;
     this.cop.y *= k;
     // 웅크리는 동안 감아둔 샤빗 토크는 점프할 때까지 유지
-    if (!this.crouching) this.yaw *= Math.exp(-this.yawDecay * dt);
+    if (!this.crouching) {
+      this.yaw *= Math.exp(-this.yawDecay * dt);
+      this.flip *= Math.exp(-this.yawDecay * dt);
+    }
     this.bodyYaw *= Math.exp(-this.yawDecay * dt);
 
     if (this.crouching) this.crouch = Math.min(1, this.crouch + dt * 2.5);
@@ -60,14 +65,16 @@ export class MouseInput implements InputSource {
     const pop = this.popQueued;
     const crouch = this.crouch;
     const yaw = this.yaw;
+    const flip = this.flip;
     if (pop) {
       this.popQueued = false;
       this.crouch = 0;
       this.yaw = 0;
+      this.flip = 0;
     }
 
     const lean = worldToBody(ctx.bodyHeading, this.cop.y, this.cop.x);
-    return { leanForward: lean.forward, leanSide: lean.side, yaw, bodyYaw: this.bodyYaw, crouch, pop };
+    return { leanForward: lean.forward, leanSide: lean.side, yaw, flip, bodyYaw: this.bodyYaw, crouch, pop };
   }
 
   dispose(): void {
@@ -89,7 +96,10 @@ export class MouseInput implements InputSource {
     if (!this.locked) return;
     if (this.spinning) {
       if (e.shiftKey) this.bodyYaw = clamp(this.bodyYaw + e.movementX * this.sensitivity * 1.5, -1, 1);
-      else this.yaw = clamp(this.yaw + e.movementX * this.windupSensitivity, -1, 1);
+      else {
+        this.yaw = clamp(this.yaw + e.movementX * this.windupSensitivity, -1, 1);
+        this.flip = clamp(this.flip - e.movementY * this.windupSensitivity, -1, 1);
+      }
       return;
     }
     this.cop.x += e.movementX * this.sensitivity;

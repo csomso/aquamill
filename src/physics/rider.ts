@@ -40,6 +40,13 @@ const LATERAL_FORCE = 6;
  * 깊이 웅크렸다 뛸수록 세게 찰 수 있어서, 360 은 높은 점프에서만 되고 540 은 안 된다.
  */
 const SHOVE_IMPULSE = 6;
+/**
+ * 점프 순간 앞발로 보드 모서리를 차서 주는 최대 플립 속도(rad/s, flip 1·최대로 웅크림 기준).
+ * 보통 점프로 킥플립 한 바퀴, 더블은 거의 불가능.
+ */
+const FLIP_IMPULSE = 11;
+/** 플립은 착지할 때 발로 보드를 잡아 세울 수 있어 허용 각도가 더 넓다 */
+const FLIP_LAND_TOLERANCE = (55 * Math.PI) / 180;
 const BODY_SPIN_RATE = 7;
 const WEATHERVANE = 2;
 /** 레귤러 스탠스의 몸 방향: 가슴이 화면 왼쪽(-x) */
@@ -102,6 +109,9 @@ export interface RiderState {
   bodySpin: number;
   /** 점프 순간 보드를 차서(샤빗) 발에서 떨어졌는지. 아니면 공중에서도 발에 붙어 몸과 같이 돈다 */
   boardKicked: boolean;
+  /** 보드가 길이 방향 축으로 뒤집힌 각도(rad). 0 = 바로 섬. + = 킥플립 방향 */
+  flip: number;
+  flipSpin: number;
   /** 바닥에서 보드 대비 몸 방향(±π/2). 착지할 때마다 다시 정해진다 */
   stance: number;
   /** 실제 몸 무게중심(월드 기준, 정규화). down + = 경사 아래, side + = 화면 오른쪽 */
@@ -124,6 +134,8 @@ export interface Rotation {
   body: number;
   /** 몸과 별개로 보드만 돈 회전 수 (0.5 단위) = 샤빗 */
   shove: number;
+  /** 플립 수. + = 킥플립, - = 힐플립 */
+  flips: number;
   /** 몸이 레귤러 반대쪽(화면 오른쪽)을 보고 있음 = 앞발이 바뀜 */
   fakie: boolean;
 }
@@ -147,6 +159,8 @@ export const createRider = (): RiderState => ({
   bodyHeading: REGULAR_BODY_HEADING,
   stance: REGULAR_BODY_HEADING,
   boardKicked: false,
+  flip: 0,
+  flipSpin: 0,
   bodySpin: 0,
   comDown: 0,
   comSide: 0,
@@ -197,6 +211,7 @@ export const downhillRailLoad = (boardHeading: number, comDown: number, comSide:
 const rotationSummary = (s: RiderState): Rotation => ({
   body: halfTurns(s.bodyRotation),
   shove: halfTurns(s.boardRotation - s.bodyRotation),
+  flips: Math.round(s.flip / (2 * Math.PI)),
   fakie: Math.sin(s.bodyHeading) > 0,
 });
 
@@ -261,6 +276,7 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number, feet: Fo
     // 찬 보드는 발에서 떨어져 점프 순간 받은 각속도 그대로 돈다 (공중에서 바꿀 수 없음).
     // 차지 않았으면 발이 보드를 누르고 있어 몸과 같이 돈다
     if (!s.boardKicked) s.boardSpin = s.bodySpin;
+    s.flip += s.flipSpin * dt;
     s.vx -= DAMP_X * 0.2 * s.vx * dt;
   } else {
     // 보드 폭 방향 하중(엣지)은 물에 서서히 박힌다
@@ -322,8 +338,12 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number, feet: Fo
   if (!airborne && input.pop) {
     s.vz = POP_BASE + POP_CROUCH * input.crouch;
     // 샤빗: 뛰어오르는 순간 발로 보드를 차서 준 토크만큼만 보드가 돈다
-    s.boardKicked = Math.abs(input.yaw) > 0.05;
-    s.boardSpin += input.yaw * SHOVE_IMPULSE * (0.5 + 0.5 * input.crouch);
+    // 킥플립: 같은 순간 보드 모서리를 차서 준 토크만큼만 뒤집힌다. 깊이 웅크렸을수록 세게 찬다
+    const kick = 0.5 + 0.5 * input.crouch;
+    s.boardKicked = Math.abs(input.yaw) > 0.05 || Math.abs(input.flip) > 0.05;
+    s.boardSpin += input.yaw * SHOVE_IMPULSE * kick;
+    s.flipSpin = input.flip * FLIP_IMPULSE * kick;
+    s.flip = 0;
     s.boardRotation = 0;
     s.bodyRotation = 0;
   }
@@ -336,7 +356,9 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number, feet: Fo
       // 보드가 흐름 축에 맞고, 발이 보드 위에 옆으로 설 수 있는 각도여야 한다
       const rel = Math.atan2(Math.sin(s.bodyHeading - s.boardHeading), Math.cos(s.bodyHeading - s.boardHeading));
       const footError = Math.abs(Math.abs(rel) - Math.PI / 2);
-      if (offAxis(s.boardHeading) > LAND_TOLERANCE || footError > LAND_TOLERANCE) {
+      // 보드가 다시 바로 서 있어야 한다 (뒤집혔거나 옆으로 섰으면 실패)
+      const flipError = Math.abs(Math.atan2(Math.sin(s.flip), Math.cos(s.flip)));
+      if (offAxis(s.boardHeading) > LAND_TOLERANCE || footError > LAND_TOLERANCE || flipError > FLIP_LAND_TOLERANCE) {
         s.wipeout = 'bad-landing';
       } else {
         s.stance = Math.sign(rel) * (Math.PI / 2);
@@ -344,6 +366,8 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number, feet: Fo
         s.bodyHeading = s.boardHeading + s.stance;
         s.bodySpin = 0;
         events.push({ type: 'land', ...rotationSummary(s) });
+        s.flip = 0;
+        s.flipSpin = 0;
         s.boardSpin = 0;
         s.boardRotation = 0;
         s.bodyRotation = 0;

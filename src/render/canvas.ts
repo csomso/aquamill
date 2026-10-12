@@ -95,6 +95,9 @@ export class CanvasRenderer {
     const px = this.sx(s.x);
     const py = this.sy(s.y);
     const lift = 1 + s.z * 0.25;
+    // 플립: 위에서 보면 보드 폭이 cos(각도)만큼 좁아졌다 넓어지고, 뒤집혔을 땐 바닥면이 보인다
+    const flipWidth = Math.max(0.1, Math.abs(Math.cos(s.flip)));
+    const upsideDown = Math.cos(s.flip) < 0;
 
     // 그림자
     ctx.save();
@@ -102,7 +105,7 @@ export class CanvasRenderer {
     ctx.rotate(-s.boardHeading); // heading+ = +x(화면 오른쪽)로 돈다
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
     ctx.beginPath();
-    ctx.ellipse(0, 0, (BOARD_W / 2) * this.scale, (BOARD_LEN / 2) * this.scale, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, (BOARD_W / 2) * flipWidth * this.scale, (BOARD_LEN / 2) * this.scale, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
@@ -110,9 +113,13 @@ export class CanvasRenderer {
     ctx.save();
     ctx.translate(px, py - s.z * this.scale * 0.6);
     ctx.rotate(-s.boardHeading); // heading+ = +x(화면 오른쪽)로 돈다
-    ctx.scale(lift, lift);
-    // 레일이 물에 파고들수록 빨갛게
-    ctx.fillStyle = s.wipeout ? '#c0392b' : `hsl(${34 - s.edgeLoad * 34}, 100%, ${64 - s.edgeLoad * 14}%)`;
+    ctx.scale(lift * flipWidth, lift);
+    // 레일이 물에 파고들수록 빨갛게. 뒤집혀 바닥면이 보이면 회색
+    ctx.fillStyle = s.wipeout
+      ? '#c0392b'
+      : upsideDown
+        ? '#57606f'
+        : `hsl(${34 - s.edgeLoad * 34}, 100%, ${64 - s.edgeLoad * 14}%)`;
     ctx.strokeStyle = '#1b1b1b';
     ctx.lineWidth = 2;
     const bw = BOARD_W * this.scale;
@@ -121,8 +128,8 @@ export class CanvasRenderer {
     ctx.roundRect(-bw / 2, -bl / 2, bw, bl, bw / 2);
     ctx.fill();
     ctx.stroke();
-    // 트윈팁: 앞뒤 구분 없이 양 끝에 같은 표시
-    ctx.fillStyle = 'rgba(27,27,27,0.5)';
+    // 트윈팁: 앞뒤 구분 없이 양 끝에 같은 표시 (윗면에만)
+    ctx.fillStyle = upsideDown ? 'rgba(0,0,0,0)' : 'rgba(27,27,27,0.5)';
     for (const end of [-1, 1]) {
       ctx.beginPath();
       ctx.arc(0, end * (bl / 2 - bw * 0.35), bw * 0.1, 0, Math.PI * 2);
@@ -254,6 +261,12 @@ export class CanvasRenderer {
     // 샤빗 토크는 웅크리는 동안 감아둘 때만 의미가 있다 (점프 순간 보드에 실림)
     ctx.fillStyle = hud.input.crouch > 0 ? '#70a1ff' : 'rgba(112,161,255,0.3)';
     ctx.fillRect(cx, cy - size / 2 - 32, (hud.input.yaw * size) / 2, 8);
+    // 플립 토크 게이지 (세로, 가운데에서 위 = 킥플립, 아래 = 힐플립)
+    const fx = gx - 14;
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(fx, cy - size / 2, 8, size);
+    ctx.fillStyle = hud.input.crouch > 0 ? '#ffa502' : 'rgba(255,165,2,0.3)';
+    ctx.fillRect(fx, cy, 8, (-hud.input.flip * size) / 2);
     // 몸 회전 게이지
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fillRect(cx - size / 2, cy - size / 2 - 44, size, 8);
@@ -284,7 +297,8 @@ export class CanvasRenderer {
         '마우스 좌/우: 양발 고르게면 보드 방향 그대로 옆으로 이동',
         '노즈 틀기: 위(뒷발)+좌/우 = 노즈가 그쪽으로, 아래(앞발)+좌/우 = 테일이 그쪽으로',
         '좌클릭 누르고 떼기: 웅크렸다 점프',
-        '샤빗: 좌클릭으로 웅크린 채 우클릭 드래그/휠로 토크를 감고, 좌클릭을 떼며 점프',
+        '트릭: 좌클릭으로 웅크린 채 우클릭 드래그로 토크를 감고, 좌클릭을 떼며 점프',
+        '   ← → 샤빗 / ↑ 킥플립 ↓ 힐플립 / 대각선 = 배리얼',
         'Shift + 우클릭 드래그 또는 Shift + 휠: 몸 돌리기 (바닥에선 보드째, 공중에선 몸만)',
         '보드가 돌 땐 무게를 경사 위에! 아래로 실으면 레일이 걸려 고꾸라짐',
         'ESC: 일시정지',

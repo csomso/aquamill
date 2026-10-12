@@ -12,6 +12,8 @@ export interface RiderInput {
   leanSide: number;
   /** 발로 보드만 차는 토크(샤빗). -1 ~ 1. 점프(pop) 순간의 값만 보드 회전에 쓰인다 */
   yaw: number;
+  /** 앞발로 보드 모서리를 차는 토크(플립). + = 킥플립, - = 힐플립. 점프(pop) 순간의 값만 쓰인다 */
+  flip: number;
   /** 몸을 돌리는 토크. 보드도 함께 돈다. -1 ~ 1 */
   bodyYaw: number;
   /** 웅크림 정도 0 ~ 1. 떼는 순간 pop 으로 변환된다 */
@@ -31,4 +33,4 @@ export interface InputSource {
   dispose(): void;
 }
 
-export const neutralInput = (): RiderInput => ({ leanForward: 0, leanSide: 0, yaw: 0, bodyYaw: 0, crouch: 0, pop: false });
+export const neutralInput = (): RiderInput => ({ leanForward: 0, leanSide: 0, yaw: 0, flip: 0, bodyYaw: 0, crouch: 0, pop: false });
