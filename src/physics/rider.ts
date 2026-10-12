@@ -35,8 +35,11 @@ const DAMP_X = 1.2;
 const STEER_RATE = 6;
 /** 양발에 고르게 싣고 좌우로 실었을 때 옆으로 평행 이동하는 힘 */
 const LATERAL_FORCE = 6;
-/** 점프 순간 발로 보드를 차서 주는 회전 속도(rad/s, yaw 1 기준). 공중에선 이 각속도가 그대로 유지된다 */
-const SHOVE_IMPULSE = 9;
+/**
+ * 점프 순간 발로 보드를 차서 주는 최대 회전 속도(rad/s, yaw 1·최대로 웅크림 기준). 공중에선 이 각속도가 그대로 유지된다.
+ * 깊이 웅크렸다 뛸수록 세게 찰 수 있어서, 360 은 높은 점프에서만 되고 540 은 안 된다.
+ */
+const SHOVE_IMPULSE = 6;
 const BODY_SPIN_RATE = 7;
 const WEATHERVANE = 2;
 /** 레귤러 스탠스의 몸 방향: 가슴이 화면 왼쪽(-x) */
@@ -320,7 +323,7 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number, feet: Fo
     s.vz = POP_BASE + POP_CROUCH * input.crouch;
     // 샤빗: 뛰어오르는 순간 발로 보드를 차서 준 토크만큼만 보드가 돈다
     s.boardKicked = Math.abs(input.yaw) > 0.05;
-    s.boardSpin += input.yaw * SHOVE_IMPULSE;
+    s.boardSpin += input.yaw * SHOVE_IMPULSE * (0.5 + 0.5 * input.crouch);
     s.boardRotation = 0;
     s.bodyRotation = 0;
   }

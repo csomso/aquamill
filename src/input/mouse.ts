@@ -25,6 +25,9 @@ export class MouseInput implements InputSource {
   /** 초당 중앙 복원 비율 */
   springRate = 0.35;
   yawDecay = 6;
+  /** 샤빗 토크 감기 감도. 끝까지 감으려면 약 330px 끌어야 한다 */
+  windupSensitivity = 0.003;
+  windupPerWheel = 0.15;
 
   constructor(private readonly target: HTMLElement) {
     target.addEventListener('click', this.onClick);
@@ -85,9 +88,8 @@ export class MouseInput implements InputSource {
   private onMove = (e: MouseEvent) => {
     if (!this.locked) return;
     if (this.spinning) {
-      const torque = e.movementX * this.sensitivity * 1.5;
-      if (e.shiftKey) this.bodyYaw = clamp(this.bodyYaw + torque, -1, 1);
-      else this.yaw = clamp(this.yaw + torque, -1, 1);
+      if (e.shiftKey) this.bodyYaw = clamp(this.bodyYaw + e.movementX * this.sensitivity * 1.5, -1, 1);
+      else this.yaw = clamp(this.yaw + e.movementX * this.windupSensitivity, -1, 1);
       return;
     }
     this.cop.x += e.movementX * this.sensitivity;
@@ -117,8 +119,8 @@ export class MouseInput implements InputSource {
 
   private onWheel = (e: WheelEvent) => {
     if (!this.locked) return;
-    const torque = Math.sign(e.deltaY) * 0.35;
-    if (e.shiftKey) this.bodyYaw = clamp(this.bodyYaw + torque, -1, 1);
-    else this.yaw = clamp(this.yaw + torque, -1, 1);
+    const dir = Math.sign(e.deltaY);
+    if (e.shiftKey) this.bodyYaw = clamp(this.bodyYaw + dir * 0.35, -1, 1);
+    else this.yaw = clamp(this.yaw + dir * this.windupPerWheel, -1, 1);
   };
 }
