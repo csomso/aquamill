@@ -9,7 +9,8 @@ import type { RiderInput } from '../input/types';
  * 보드는 앞뒤 대칭(트윈팁)이라 boardHeading 과 boardHeading+π 는 같은 자세다.
  * 라이더는 보드 위에 옆으로 선다: 어깨선이 보드 길이 방향, 가슴은 토 쪽(폭 방향)을 본다.
  * bodyHeading 은 가슴이 향하는 방향이고, 레귤러는 화면 왼쪽(-x)을 본다. 몸이 180 돌면 앞발이 바뀌어 페이키가 된다.
- * - 샤빗: 보드만 돈다 / 바디 회전: 몸과 보드가 함께 돈다
+ * 바닥에서는 발이 보드에 붙어 있어 몸과 보드가 함께만 돈다(stance 고정). 보드만 도는 샤빗은 공중에서만 가능하고,
+ * 착지할 때 발이 보드 위에 옆으로 설 수 있는 각도여야 한다.
  *
  * 입력 하중은 몸 기준 "목표"다. 실제 몸 무게중심(com, 월드 기준)이 스프링처럼 그 목표를 따라가고,
  * 보드에는 실제 무게중심만 전달된다. 그래서 무게를 실어도 바로 그쪽으로 가지 않는다.
@@ -34,8 +35,6 @@ const TURN_RATE = 1.8;
 const SPIN_RATE = 9;
 const BODY_SPIN_RATE = 7;
 const WEATHERVANE = 2;
-/** 바닥에서 몸이 옆으로 선 자세(가슴이 화면 좌/우)로 바로잡는 힘 */
-const BODY_SQUARE = 4;
 /** 레귤러 스탠스의 몸 방향: 가슴이 화면 왼쪽(-x) */
 export const REGULAR_BODY_HEADING = -Math.PI / 2;
 const POP_BASE = 2.5;
@@ -70,6 +69,8 @@ export interface RiderState {
   boardSpin: number;
   bodyHeading: number;
   bodySpin: number;
+  /** 바닥에서 보드 대비 몸 방향(±π/2). 착지할 때마다 다시 정해진다 */
+  stance: number;
   /** 실제 몸 무게중심(월드 기준, 정규화). down + = 경사 아래, side + = 화면 오른쪽 */
   comDown: number;
   comSide: number;
@@ -111,6 +112,7 @@ export const createRider = (): RiderState => ({
   boardHeading: 0,
   boardSpin: 0,
   bodyHeading: REGULAR_BODY_HEADING,
+  stance: REGULAR_BODY_HEADING,
   bodySpin: 0,
   comDown: 0,
   comSide: 0,
@@ -175,9 +177,8 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number): RiderEv
   s.comVSide += (BODY_STIFFNESS * (target.side - s.comSide) - BODY_DAMPING * s.comVSide) * dt;
   s.comDown += s.comVDown * dt;
   s.comSide += s.comVSide * dt;
-  // 몸 회전. 바닥에서 몸을 돌리지 않을 땐 옆으로 선 자세(±90°)로 바로잡는다 (샤빗 중에도 몸은 그대로)
-  const square = airborne ? 0 : (BODY_SQUARE * Math.sin(2 * (s.bodyHeading - Math.PI / 2)) / 2) * (1 - Math.min(1, Math.abs(input.bodyYaw)));
-  s.bodySpin += (input.bodyYaw * BODY_SPIN_RATE - square - s.bodySpin) * Math.min(1, 6 * dt);
+  // 몸 회전은 공중에서만 보드와 따로 논다. 바닥에서는 아래에서 보드에 묶인다
+  if (airborne) s.bodySpin += (input.bodyYaw * BODY_SPIN_RATE - s.bodySpin) * Math.min(1, 6 * dt);
 
   // 물에 대한 상대 속도: 내려갈수록 물을 세게 받아 보드 반응이 빨라진다
   const flowSpeed = 1 + Math.max(0, -s.vy);
@@ -195,7 +196,6 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number): RiderEv
     s.vy = Math.max(0, s.vy);
   }
 
-  const twisting = Math.min(1, Math.abs(input.yaw) + Math.abs(input.bodyYaw));
   if (airborne) {
     // 공중 회전은 입력을 따라가고, 놓으면 멈춘다 (착지 각도를 플레이어가 맞출 수 있게)
     s.boardSpin += (input.yaw * SPIN_RATE + s.bodySpin - s.boardSpin) * Math.min(1, 4 * dt);
@@ -204,11 +204,13 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number): RiderEv
     // 엣지는 물에 서서히 박힌다. 보드가 옆으로 설수록 카빙은 안 먹힌다
     s.edge += (s.comSide - s.edge) * Math.min(1, EDGE_ENGAGE_RATE * flowSpeed * dt);
     // 경사 아래쪽 끝이 엣지 쪽으로 돈다. 스핀 입력이 없으면 물살이 보드를 가까운 흐름 축(0 또는 π)으로 되돌린다
-    // 트윈팁이라 sin(2θ): 샤빗 180 은 180 에서 멈춘다
+    // 트윈팁이라 sin(2θ): 180 은 180 에서 멈춘다
+    // 발이 붙어 있으니 보드만 돌리는 입력(yaw)은 먹히지 않고, 몸을 돌려야(bodyYaw) 보드째 돈다
+    const twisting = Math.min(1, Math.abs(input.bodyYaw));
     const carve = s.edge * TURN_RATE * Math.abs(Math.cos(s.boardHeading));
     const realign = WEATHERVANE * Math.sin(2 * s.boardHeading) / 2;
-    const targetSpin = carve + input.yaw * SPIN_RATE + s.bodySpin - realign * (1 - twisting);
-    // 발로 비트는 스핀은 즉각적이고, 엣지로 도는 회전은 속도가 붙어야 빨라진다
+    const targetSpin = carve + input.bodyYaw * BODY_SPIN_RATE - realign * (1 - twisting);
+    // 몸으로 비트는 스핀은 즉각적이고, 엣지로 도는 회전은 속도가 붙어야 빨라진다
     const response = twisting > 0.1 ? 8 : TURN_RESPONSE * flowSpeed;
     s.boardSpin += (targetSpin - s.boardSpin) * Math.min(1, response * dt);
     // 보드는 자기 축을 따라 미끄러진다. 축은 heading 과 heading+π 가 같으므로 sin·cos(주기 π)
@@ -217,7 +219,13 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number): RiderEv
     s.vx += (CARVE_FORCE * carveBoost * Math.sin(s.boardHeading) * Math.cos(s.boardHeading) - DAMP_X * s.vx) * dt;
   }
   s.boardHeading += s.boardSpin * dt;
-  s.bodyHeading += s.bodySpin * dt;
+  if (airborne) {
+    s.bodyHeading += s.bodySpin * dt;
+  } else {
+    // 발이 보드에 붙어 있다
+    s.bodySpin = s.boardSpin;
+    s.bodyHeading = s.boardHeading + s.stance;
+  }
   s.boardRotation += s.boardSpin * dt;
   s.bodyRotation += s.bodySpin * dt;
 
@@ -240,9 +248,15 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number): RiderEv
     if (s.z <= 0) {
       s.z = 0;
       s.vz = 0;
-      if (offAxis(s.boardHeading) > LAND_TOLERANCE) {
+      // 보드가 흐름 축에 맞고, 발이 보드 위에 옆으로 설 수 있는 각도여야 한다
+      const rel = Math.atan2(Math.sin(s.bodyHeading - s.boardHeading), Math.cos(s.bodyHeading - s.boardHeading));
+      const footError = Math.abs(Math.abs(rel) - Math.PI / 2);
+      if (offAxis(s.boardHeading) > LAND_TOLERANCE || footError > LAND_TOLERANCE) {
         s.wipeout = 'bad-landing';
       } else {
+        s.stance = Math.sign(rel) * (Math.PI / 2);
+        s.bodyHeading = s.boardHeading + s.stance;
+        s.bodySpin = 0;
         events.push({ type: 'land', ...rotationSummary(s) });
         s.boardSpin = 0;
         s.boardRotation = 0;

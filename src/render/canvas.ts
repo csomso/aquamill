@@ -1,10 +1,11 @@
 import type { RiderInput } from '../input/types';
-import { SHEET, slopeAngle, type RiderState } from '../physics/rider';
+import { SHEET, bodyToWorld, slopeAngle, worldToBody, type RiderState } from '../physics/rider';
 
 const BOARD_LEN = 1.3;
 const BOARD_W = 0.45;
-/** 무게중심 1 이 화면에서 보드 중심으로부터 떨어지는 거리(m) */
-const COM_REACH = 0.35;
+/** 무게중심 1 일 때 상체가 기울어지는 거리(m). 보드 폭 방향(가슴 쪽)은 좁고, 길이 방향(어깨선)은 조금 더 */
+const LEAN_ACROSS = 0.1;
+const LEAN_ALONG = 0.2;
 
 export interface Hud {
   locked: boolean;
@@ -153,9 +154,12 @@ export class CanvasRenderer {
     }
     ctx.restore();
 
-    // 상체: 어깨선 + 머리(가슴 쪽으로 살짝)
+    // 상체: 실제 무게중심 쪽으로 기울되 보드 밖으로 나가지 않게, 몸 기준으로 축마다 따로 제한
+    const lean = worldToBody(s.bodyHeading, s.comDown, s.comSide);
+    const clamp1 = (v: number) => Math.max(-1, Math.min(1, v));
+    const offset = bodyToWorld(s.bodyHeading, clamp1(lean.forward) * LEAN_ACROSS, clamp1(lean.side) * LEAN_ALONG);
     ctx.save();
-    ctx.translate(px + s.comSide * COM_REACH * k, py + s.comDown * COM_REACH * k);
+    ctx.translate(px + offset.side * k, py + offset.down * k);
     ctx.rotate(-s.bodyHeading);
     ctx.scale(lift, lift);
     ctx.strokeStyle = '#2f3542';
@@ -241,7 +245,9 @@ export class CanvasRenderer {
     ctx.fillRect(gx, cy + size / 2 - hud.input.crouch * size, 10, hud.input.crouch * size);
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fillRect(cx - size / 2, cy - size / 2 - 32, size, 8);
-    ctx.fillStyle = '#70a1ff';
+    // 보드만 돌리기는 공중에서만 먹힌다
+    const grounded = s.z === 0 && s.vz === 0;
+    ctx.fillStyle = grounded ? 'rgba(112,161,255,0.3)' : '#70a1ff';
     ctx.fillRect(cx, cy - size / 2 - 32, (hud.input.yaw * size) / 2, 8);
     // 몸 회전 게이지
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
@@ -272,8 +278,8 @@ export class CanvasRenderer {
         '마우스 아래/위: 경사 아래/위로 무게 (내려가기/올라가기)',
         '마우스 좌/우: 좌우로 무게 (카빙) — 몸이 따라오는 데 시간이 걸린다',
         '좌클릭 누르고 떼기: 웅크렸다 점프',
-        '우클릭 드래그 또는 휠: 보드만 돌리기 (샤빗)',
-        'Shift + 우클릭 드래그 또는 Shift + 휠: 몸 돌리기 (보드도 같이)',
+        '우클릭 드래그 또는 휠: 점프 중 보드만 돌리기 (샤빗) — 바닥에선 발이 붙어 있어 안 돈다',
+        'Shift + 우클릭 드래그 또는 Shift + 휠: 몸 돌리기 (바닥에선 보드째, 공중에선 몸만)',
         '보드가 돌 땐 무게를 경사 위에! 아래로 실으면 레일이 걸려 고꾸라짐',
         'ESC: 일시정지',
       ];
