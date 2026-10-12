@@ -1,11 +1,10 @@
 import type { RiderInput } from '../input/types';
-import { SHEET, bodyToWorld, slopeAngle, worldToBody, type RiderState } from '../physics/rider';
+import { BOARD_HALF_LENGTH, SHEET, bodyToWorld, pressurePoint, slopeAngle, worldToBody, type FootSetup, type RiderState } from '../physics/rider';
 
-const BOARD_LEN = 1.3;
+const BOARD_LEN = BOARD_HALF_LENGTH * 2;
 const BOARD_W = 0.45;
-/** 무게중심 1 일 때 상체가 기울어지는 거리(m). 보드 폭 방향(가슴 쪽)은 좁고, 길이 방향(어깨선)은 조금 더 */
+/** 무게중심 1 일 때 상체가 보드 폭 방향(가슴 쪽)으로 기울어지는 거리(m). 길이 방향은 하중 지점을 따른다 */
 const LEAN_ACROSS = 0.1;
-const LEAN_ALONG = 0.2;
 
 export interface Hud {
   locked: boolean;
@@ -13,6 +12,7 @@ export interface Hud {
   input: RiderInput;
   score: number;
   message: string | null;
+  feet: FootSetup;
 }
 
 export class CanvasRenderer {
@@ -50,7 +50,7 @@ export class CanvasRenderer {
     ctx.fillStyle = '#0b1622';
     ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
     this.drawSheet(dt);
-    this.drawRider(s);
+    this.drawRider(s, hud);
     this.drawHud(s, hud);
   }
 
@@ -90,7 +90,7 @@ export class CanvasRenderer {
     ctx.fillRect(x0, top - 4, w, 6);
   }
 
-  private drawRider(s: RiderState) {
+  private drawRider(s: RiderState, hud: Hud) {
     const { ctx } = this;
     const px = this.sx(s.x);
     const py = this.sy(s.y);
@@ -130,36 +130,42 @@ export class CanvasRenderer {
     }
     ctx.restore();
 
-    this.drawBody(s, px, py - s.z * this.scale * 0.6, lift);
+    this.drawBody(s, hud.feet, px, py - s.z * this.scale * 0.6, lift);
   }
 
   /**
-   * 몸: 옆으로 선 자세. 발은 보드 위(보드 길이 방향 앞뒤), 상체는 실제 무게중심 쪽으로 쏠린다.
-   * 로컬 좌표에서 +y 가 가슴 방향, x 축이 어깨선(= 보드 길이 방향).
+   * 몸: 옆으로 선 자세. 두 발은 설정한 위치에(보드 길이 방향), 상체는 하중 지점 위에 선다.
+   * 상체 로컬 좌표에서 +y 가 가슴 방향, x 축이 어깨선(= 보드 길이 방향).
    */
-  private drawBody(s: RiderState, px: number, py: number, lift: number) {
+  private drawBody(s: RiderState, feet: FootSetup, px: number, py: number, lift: number) {
     const { ctx } = this;
     const k = this.scale;
+    // 월드 오프셋(앞발 방향 거리 along, 가슴 방향 거리 across, m) → 화면 좌표
+    const at = (along: number, across: number) => {
+      const w = bodyToWorld(s.bodyHeading, across, along);
+      return { x: px + w.side * k * lift, y: py + w.down * k * lift };
+    };
 
-    // 발: 몸 방향 기준으로 어깨선 위 앞뒤
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate(-s.bodyHeading);
-    ctx.scale(lift, lift);
+    // 발: 보드를 가로지르는 방향으로 놓인다 (바닥에선 보드에 붙어 있다)
     ctx.fillStyle = '#2f3542';
-    for (const side of [-1, 1]) {
+    for (const u of [feet.front, feet.back]) {
+      const p = at(u * BOARD_HALF_LENGTH, 0);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(-(s.bodyHeading - s.stance));
+      ctx.scale(lift, lift);
       ctx.beginPath();
-      ctx.ellipse(side * 0.25 * k, 0, 0.07 * k, 0.12 * k, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, 0.12 * k, 0.065 * k, 0, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
     }
-    ctx.restore();
 
-    // 상체: 실제 무게중심 쪽으로 기울되 보드 밖으로 나가지 않게, 몸 기준으로 축마다 따로 제한
+    // 상체: 길이 방향은 하중 지점 위, 폭 방향은 가슴 쪽으로 조금만 기운다
     const lean = worldToBody(s.bodyHeading, s.comDown, s.comSide);
-    const clamp1 = (v: number) => Math.max(-1, Math.min(1, v));
-    const offset = bodyToWorld(s.bodyHeading, clamp1(lean.forward) * LEAN_ACROSS, clamp1(lean.side) * LEAN_ALONG);
+    const across = Math.max(-1, Math.min(1, lean.forward)) * LEAN_ACROSS;
+    const torso = at(pressurePoint(s, feet) * BOARD_HALF_LENGTH, across);
     ctx.save();
-    ctx.translate(px + offset.side * k, py + offset.down * k);
+    ctx.translate(torso.x, torso.y);
     ctx.rotate(-s.bodyHeading);
     ctx.scale(lift, lift);
     ctx.strokeStyle = '#2f3542';

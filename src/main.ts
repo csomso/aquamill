@@ -2,10 +2,12 @@ import { MouseInput } from './input/mouse';
 import { neutralInput } from './input/types';
 import { createRider, stepRider, type Rotation, type WipeoutReason } from './physics/rider';
 import { CanvasRenderer } from './render/canvas';
+import { createFeetPanel } from './ui/feetPanel';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const renderer = new CanvasRenderer(canvas);
 const input = new MouseInput(canvas);
+const feet = createFeetPanel();
 
 const WIPEOUT_TEXT: Record<WipeoutReason, string> = {
   'over-the-top': '크레스트 너머로 넘어감!',
@@ -50,7 +52,7 @@ function frame(now: number) {
     while (accumulator >= FIXED_DT) {
       const stepInput = popConsumed ? { ...rawInput, pop: false } : rawInput;
       popConsumed ||= rawInput.pop;
-      for (const ev of stepRider(rider, stepInput, FIXED_DT)) {
+      for (const ev of stepRider(rider, stepInput, FIXED_DT, feet)) {
         if (ev.type === 'land') {
           const gained = 10 + trickValue(ev);
           score += gained;
@@ -80,7 +82,7 @@ function frame(now: number) {
     if (messageTimer <= 0) message = null;
   }
 
-  renderer.render(rider, { locked: input.locked, cop: input.centerOfPressure, input: rawInput, score, message }, dt);
+  renderer.render(rider, { locked: input.locked, cop: input.centerOfPressure, input: rawInput, score, message, feet }, dt);
   requestAnimationFrame(frame);
 }
 

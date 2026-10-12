@@ -37,6 +37,30 @@ const BODY_SPIN_RATE = 7;
 const WEATHERVANE = 2;
 /** 레귤러 스탠스의 몸 방향: 가슴이 화면 왼쪽(-x) */
 export const REGULAR_BODY_HEADING = -Math.PI / 2;
+
+export const BOARD_HALF_LENGTH = 0.65;
+
+/**
+ * 발 위치. 보드 중심에서 보드 길이 방향으로 잰 거리를 반길이(BOARD_HALF_LENGTH) 단위로 나타낸다.
+ * + = 앞발 쪽(레귤러로 탈 때 경사 아래), -1 = 테일 끝.
+ */
+export interface FootSetup {
+  front: number;
+  back: number;
+}
+
+/** 실제 플로우보드: 앞발은 중심 또는 살짝 앞, 뒷발은 테일 끝 */
+export const DEFAULT_FEET: FootSetup = { front: 0.1, back: -0.9 };
+
+/**
+ * 하중 지점이 여기(뒷발 쪽으로 치우친 곳)에 있으면 보드가 수평을 유지한다.
+ * 기본 발 위치에서 두 발에 고르게 실었을 때 중립이 되도록 정했다.
+ */
+const BOARD_BALANCE = -0.4;
+/** 균형점에서 하중 지점이 이만큼 벗어나면 예전 하중 1 과 같은 힘 */
+const LEVER_NORM = 0.5;
+/** 하중 지점이 균형점보다 뒤로 갈수록(노즈가 들릴수록) 회전이 빨라지는 정도 */
+const NOSE_LIFT_TURN_BOOST = 1;
 const POP_BASE = 2.5;
 const POP_CROUCH = 3;
 const LAND_TOLERANCE = (35 * Math.PI) / 180;
@@ -166,7 +190,21 @@ const rotationSummary = (s: RiderState): Rotation => ({
   fakie: Math.sin(s.bodyHeading) > 0,
 });
 
-export function stepRider(s: RiderState, input: RiderInput, dt: number): RiderEvent[] {
+/** 앞발 방향 단위벡터(월드, x 오른쪽 / y 경사 위). 레귤러면 경사 아래를 향한다 */
+const frontFootAxis = (bodyHeading: number) => ({ x: Math.cos(bodyHeading), y: Math.sin(bodyHeading) });
+
+/**
+ * 하중 지점: 몸 무게중심이 두 발 사이 어디에 실렸는지에 따라 보드를 누르는 위치(반길이 단위, 앞발 방향 +).
+ * 무게중심을 앞발 쪽으로 옮길수록 앞발 위치에, 뒤로 옮길수록 뒷발 위치에 가까워진다.
+ */
+export const pressurePoint = (s: RiderState, feet: FootSetup) => {
+  const axis = frontFootAxis(s.bodyHeading);
+  const toward = s.comSide * axis.x - s.comDown * axis.y;
+  const frontShare = Math.max(0, Math.min(1, (1 + toward) / 2));
+  return feet.back + (feet.front - feet.back) * frontShare;
+};
+
+export function stepRider(s: RiderState, input: RiderInput, dt: number, feet: FootSetup = DEFAULT_FEET): RiderEvent[] {
   if (s.wipeout) return [];
   const events: RiderEvent[] = [];
   const airborne = s.z > 0 || s.vz > 0;
@@ -188,7 +226,12 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number): RiderEv
   const steepness = slopeAngle(s.y) / SHEET.MAX_SLOPE;
   const pitchGain = 0.4 + 1.6 * steepness;
   const push = FLOW_PUSH + BROADSIDE_PUSH * broadside;
-  const ay = push - G * Math.sin(slopeAngle(s.y)) - PITCH_FORCE * pitchGain * s.comDown - DAMP_Y * s.vy;
+  // 지렛대: 하중 지점이 균형점보다 앞이면 노즈가 눌려 내려가고, 뒤면 노즈가 들려 올라간다.
+  // 그 방향을 경사에 투영한 만큼만 경사 방향 힘이 된다 (스위치로 타면 반대)
+  const axis = frontFootAxis(s.bodyHeading);
+  const trim = pressurePoint(s, feet) - BOARD_BALANCE;
+  const drive = (trim / LEVER_NORM) * -axis.y;
+  const ay = push - G * Math.sin(slopeAngle(s.y)) - PITCH_FORCE * pitchGain * drive - DAMP_Y * s.vy;
   s.vy += ay * dt;
   s.y += s.vy * dt;
   if (s.y < 0) {
@@ -207,7 +250,9 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number): RiderEv
     // 트윈팁이라 sin(2θ): 180 은 180 에서 멈춘다
     // 발이 붙어 있으니 보드만 돌리는 입력(yaw)은 먹히지 않고, 몸을 돌려야(bodyYaw) 보드째 돈다
     const twisting = Math.min(1, Math.abs(input.bodyYaw));
-    const carve = s.edge * TURN_RATE * Math.abs(Math.cos(s.boardHeading));
+    // 뒤에 실어 노즈가 들리면 물에 잠긴 면이 줄어 빨리 돌고, 앞에 실으면 넓고 부드럽게 돈다
+    const noseLift = Math.max(0, Math.min(1, -trim / LEVER_NORM));
+    const carve = s.edge * TURN_RATE * (1 + NOSE_LIFT_TURN_BOOST * noseLift) * Math.abs(Math.cos(s.boardHeading));
     const realign = WEATHERVANE * Math.sin(2 * s.boardHeading) / 2;
     const targetSpin = carve + input.bodyYaw * BODY_SPIN_RATE - realign * (1 - twisting);
     // 몸으로 비트는 스핀은 즉각적이고, 엣지로 도는 회전은 속도가 붙어야 빨라진다
@@ -217,6 +262,14 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number): RiderEv
     // 내려오며 얻은 속도는 옆으로 치고 나가는 힘이 된다
     const carveBoost = 1 + CARVE_SPEED_BOOST * Math.max(0, -s.vy);
     s.vx += (CARVE_FORCE * carveBoost * Math.sin(s.boardHeading) * Math.cos(s.boardHeading) - DAMP_X * s.vx) * dt;
+  }
+  // 바닥에서는 보드가 하중 지점을 축으로 돈다: 뒷발에 실으면 테일 피벗, 앞발에 실으면 중심 근처에서 돈다
+  if (!airborne) {
+    const pivot = pressurePoint(s, feet) * BOARD_HALF_LENGTH;
+    const before = frontFootAxis(s.bodyHeading);
+    const after = frontFootAxis(s.bodyHeading + s.boardSpin * dt);
+    s.x += pivot * (before.x - after.x);
+    s.y += pivot * (before.y - after.y);
   }
   s.boardHeading += s.boardSpin * dt;
   if (airborne) {
