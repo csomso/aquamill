@@ -7,7 +7,8 @@ import type { RiderInput } from '../input/types';
  * 방향(heading) 0 = 경사 아래(-y)를 향함. 양수면 +x 쪽으로 돈다.
  *
  * 보드는 앞뒤 대칭(트윈팁)이라 boardHeading 과 boardHeading+π 는 같은 자세다.
- * 앞뒤(레귤러/페이키)는 몸 방향 bodyHeading 으로만 정해진다.
+ * 라이더는 보드 위에 옆으로 선다: 어깨선이 보드 길이 방향, 가슴은 토 쪽(폭 방향)을 본다.
+ * bodyHeading 은 가슴이 향하는 방향이고, 레귤러는 화면 왼쪽(-x)을 본다. 몸이 180 돌면 앞발이 바뀌어 페이키가 된다.
  * - 샤빗: 보드만 돈다 / 바디 회전: 몸과 보드가 함께 돈다
  *
  * 입력 하중은 몸 기준 "목표"다. 실제 몸 무게중심(com, 월드 기준)이 스프링처럼 그 목표를 따라가고,
@@ -33,8 +34,10 @@ const TURN_RATE = 1.8;
 const SPIN_RATE = 9;
 const BODY_SPIN_RATE = 7;
 const WEATHERVANE = 2;
-/** 바닥에서 몸이 흐름 축(경사 아래/위)으로 자세를 바로잡는 힘 */
+/** 바닥에서 몸이 옆으로 선 자세(가슴이 화면 좌/우)로 바로잡는 힘 */
 const BODY_SQUARE = 4;
+/** 레귤러 스탠스의 몸 방향: 가슴이 화면 왼쪽(-x) */
+export const REGULAR_BODY_HEADING = -Math.PI / 2;
 const POP_BASE = 2.5;
 const POP_CROUCH = 3;
 const LAND_TOLERANCE = (35 * Math.PI) / 180;
@@ -87,7 +90,7 @@ export interface Rotation {
   body: number;
   /** 몸과 별개로 보드만 돈 회전 수 (0.5 단위) = 샤빗 */
   shove: number;
-  /** 몸이 경사 위를 보고 있음 */
+  /** 몸이 레귤러 반대쪽(화면 오른쪽)을 보고 있음 = 앞발이 바뀜 */
   fakie: boolean;
 }
 
@@ -107,7 +110,7 @@ export const createRider = (): RiderState => ({
   vz: 0,
   boardHeading: 0,
   boardSpin: 0,
-  bodyHeading: 0,
+  bodyHeading: REGULAR_BODY_HEADING,
   bodySpin: 0,
   comDown: 0,
   comSide: 0,
@@ -158,7 +161,7 @@ export const downhillRailLoad = (boardHeading: number, comDown: number, comSide:
 const rotationSummary = (s: RiderState): Rotation => ({
   body: halfTurns(s.bodyRotation),
   shove: halfTurns(s.boardRotation - s.bodyRotation),
-  fakie: Math.cos(s.bodyHeading) < 0,
+  fakie: Math.sin(s.bodyHeading) > 0,
 });
 
 export function stepRider(s: RiderState, input: RiderInput, dt: number): RiderEvent[] {
@@ -172,8 +175,8 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number): RiderEv
   s.comVSide += (BODY_STIFFNESS * (target.side - s.comSide) - BODY_DAMPING * s.comVSide) * dt;
   s.comDown += s.comVDown * dt;
   s.comSide += s.comVSide * dt;
-  // 몸 회전. 바닥에서 몸을 돌리지 않을 땐 가까운 흐름 축으로 자세를 바로잡는다 (샤빗 중에도 몸은 그대로)
-  const square = airborne ? 0 : (BODY_SQUARE * Math.sin(2 * s.bodyHeading) / 2) * (1 - Math.min(1, Math.abs(input.bodyYaw)));
+  // 몸 회전. 바닥에서 몸을 돌리지 않을 땐 옆으로 선 자세(±90°)로 바로잡는다 (샤빗 중에도 몸은 그대로)
+  const square = airborne ? 0 : (BODY_SQUARE * Math.sin(2 * (s.bodyHeading - Math.PI / 2)) / 2) * (1 - Math.min(1, Math.abs(input.bodyYaw)));
   s.bodySpin += (input.bodyYaw * BODY_SPIN_RATE - square - s.bodySpin) * Math.min(1, 6 * dt);
 
   // 물에 대한 상대 속도: 내려갈수록 물을 세게 받아 보드 반응이 빨라진다

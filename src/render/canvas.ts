@@ -132,28 +132,50 @@ export class CanvasRenderer {
     this.drawBody(s, px, py - s.z * this.scale * 0.6, lift);
   }
 
-  /** 몸: 실제 무게중심 위치에 어깨선 + 머리(바라보는 쪽) */
+  /**
+   * 몸: 옆으로 선 자세. 발은 보드 위(보드 길이 방향 앞뒤), 상체는 실제 무게중심 쪽으로 쏠린다.
+   * 로컬 좌표에서 +y 가 가슴 방향, x 축이 어깨선(= 보드 길이 방향).
+   */
   private drawBody(s: RiderState, px: number, py: number, lift: number) {
     const { ctx } = this;
+    const k = this.scale;
+
+    // 발: 몸 방향 기준으로 어깨선 위 앞뒤
     ctx.save();
-    ctx.translate(px + s.comSide * COM_REACH * this.scale, py + s.comDown * COM_REACH * this.scale);
+    ctx.translate(px, py);
     ctx.rotate(-s.bodyHeading);
     ctx.scale(lift, lift);
-    const shoulder = 0.25 * this.scale;
+    ctx.fillStyle = '#2f3542';
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.ellipse(side * 0.25 * k, 0, 0.07 * k, 0.12 * k, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // 상체: 어깨선 + 머리(가슴 쪽으로 살짝)
+    ctx.save();
+    ctx.translate(px + s.comSide * COM_REACH * k, py + s.comDown * COM_REACH * k);
+    ctx.rotate(-s.bodyHeading);
+    ctx.scale(lift, lift);
     ctx.strokeStyle = '#2f3542';
-    ctx.lineWidth = 0.14 * this.scale;
+    ctx.lineWidth = 0.14 * k;
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(-shoulder, 0);
-    ctx.lineTo(shoulder, 0);
+    ctx.moveTo(-0.22 * k, 0);
+    ctx.lineTo(0.22 * k, 0);
     ctx.stroke();
     ctx.fillStyle = '#f1c27d';
-    ctx.strokeStyle = '#2f3542';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(0, 0.09 * this.scale, 0.1 * this.scale, 0, Math.PI * 2);
+    ctx.arc(0, 0.06 * k, 0.1 * k, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
+    // 코: 바라보는 방향 표시
+    ctx.fillStyle = '#2f3542';
+    ctx.beginPath();
+    ctx.arc(0, 0.15 * k, 0.025 * k, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
 
