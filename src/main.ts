@@ -46,6 +46,10 @@ function frame(now: number) {
           const gained = 10 + Math.round(ev.rotations * 2) * 25;
           score += gained;
           flash(`${spin}${ev.fakie ? '페이키 ' : ''}착지 +${gained}`);
+        } else if (ev.type === 'surface-spin') {
+          const gained = Math.round(ev.rotations * 2) * 20;
+          score += gained;
+          flash(`서피스 ${ev.rotations * 360}${ev.fakie ? ' (페이키)' : ''} +${gained}`);
         } else {
           flash(WIPEOUT_TEXT[ev.reason], 1.5);
           resetTimer = 1.5;

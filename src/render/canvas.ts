@@ -48,7 +48,7 @@ export class CanvasRenderer {
     ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
     this.drawSheet(dt);
     this.drawRider(s);
-    this.drawHud(hud);
+    this.drawHud(s, hud);
   }
 
   private drawSheet(dt: number) {
@@ -108,7 +108,8 @@ export class CanvasRenderer {
     ctx.translate(px, py - s.z * this.scale * 0.6);
     ctx.rotate(-s.heading); // heading+ = 노즈가 +x(화면 오른쪽)로
     ctx.scale(lift, lift);
-    ctx.fillStyle = s.wipeout ? '#c0392b' : '#ffb347';
+    // 레일이 물에 파고들수록 빨갛게
+    ctx.fillStyle = s.wipeout ? '#c0392b' : `hsl(${34 - s.edgeLoad * 34}, 100%, ${64 - s.edgeLoad * 14}%)`;
     ctx.strokeStyle = '#1b1b1b';
     ctx.lineWidth = 2;
     const bw = BOARD_W * this.scale;
@@ -125,14 +126,14 @@ export class CanvasRenderer {
     ctx.restore();
   }
 
-  private drawHud(hud: Hud) {
+  private drawHud(s: RiderState, hud: Hud) {
     const { ctx } = this;
     const W = window.innerWidth;
     const H = window.innerHeight;
 
     // 압력중심 패드 (보드 탑뷰)
     const size = 120;
-    const cx = W - size / 2 - 24;
+    const cx = W - size / 2 - 44;
     const cy = H - size / 2 - 24;
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fillRect(cx - size / 2, cy - size / 2, size, size);
@@ -144,6 +145,17 @@ export class CanvasRenderer {
     ctx.moveTo(cx - size / 2, cy);
     ctx.lineTo(cx + size / 2, cy);
     ctx.stroke();
+    // 패드 안의 보드: 실제 보드와 같이 돌아서, 무게가 어느 레일에 실렸는지 보인다
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(-s.heading);
+    ctx.strokeStyle = `rgba(255,${180 - s.edgeLoad * 180},${120 - s.edgeLoad * 120},0.8)`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(-size * 0.14, -size * 0.4, size * 0.28, size * 0.8, size * 0.14);
+    ctx.stroke();
+    ctx.restore();
+
     ctx.fillStyle = '#ffb347';
     ctx.beginPath();
     ctx.arc(cx + hud.cop.x * (size / 2), cy + hud.cop.y * (size / 2), 7, 0, Math.PI * 2);
@@ -152,8 +164,15 @@ export class CanvasRenderer {
     ctx.font = '12px system-ui, sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
     ctx.textAlign = 'center';
-    ctx.fillText('뒷발', cx, cy - size / 2 - 6);
-    ctx.fillText('앞발', cx, cy + size / 2 + 14);
+    ctx.fillText('뒤 (경사 위)', cx, cy - size / 2 - 6);
+    ctx.fillText('앞 (경사 아래)', cx, cy + size / 2 + 14);
+
+    // 레일 파고듦 게이지
+    const ex = cx + size / 2 + 12;
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(ex, cy - size / 2, 10, size);
+    ctx.fillStyle = '#ff4757';
+    ctx.fillRect(ex, cy + size / 2 - s.edgeLoad * size, 10, s.edgeLoad * size);
 
     // 웅크림 / 스핀 게이지
     const gx = cx - size / 2 - 22;
@@ -186,10 +205,10 @@ export class CanvasRenderer {
       ctx.fillText('클릭해서 시작', W / 2, H / 2 - 60);
       ctx.font = '16px system-ui, sans-serif';
       const lines = [
-        '마우스 아래/위: 앞발/뒷발 하중 (내려가기/올라가기)',
+        '마우스 아래/위: 앞/뒤 하중 (내려가기/올라가기)',
         '마우스 좌/우: 힐/토 엣지 (카빙)',
         '좌클릭 누르고 떼기: 웅크렸다 점프',
-        '우클릭 드래그 또는 휠: 스핀',
+        '우클릭 드래그 또는 휠: 스핀 (보드가 돌 땐 무게를 뒤에! 앞에 실으면 레일이 걸려 고꾸라짐)',
         'ESC: 일시정지',
       ];
       lines.forEach((l, i) => ctx.fillText(l, W / 2, H / 2 - 10 + i * 26));

@@ -3,10 +3,13 @@
  * 마우스 / 터치(두 엄지) / 웹캠 포즈 추정은 각각 어댑터로 이 형태를 만들어낸다.
  */
 export interface RiderInput {
-  /** 앞뒤 하중. -1 = 뒷발, +1 = 앞발 */
-  pitch: number;
-  /** 엣지. -1 = 힐, +1 = 토 */
-  roll: number;
+  /**
+   * 경사 방향 하중(월드 기준). +1 = 경사 아래(라이더가 바라보는 쪽), -1 = 경사 위.
+   * 보드가 돌아가도 기준은 그대로다. 서피스 360 중에도 상체는 아래를 바라보므로.
+   */
+  leanForward: number;
+  /** 좌우 하중(월드 기준). +1 = 화면 오른쪽 */
+  leanSide: number;
   /** 비틀림 토크(스핀). -1 ~ 1 */
   yaw: number;
   /** 웅크림 정도 0 ~ 1. 떼는 순간 pop 으로 변환된다 */
@@ -21,4 +24,4 @@ export interface InputSource {
   dispose(): void;
 }
 
-export const neutralInput = (): RiderInput => ({ pitch: 0, roll: 0, yaw: 0, crouch: 0, pop: false });
+export const neutralInput = (): RiderInput => ({ leanForward: 0, leanSide: 0, yaw: 0, crouch: 0, pop: false });
