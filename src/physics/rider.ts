@@ -31,7 +31,10 @@ const CARVE_FORCE = 8;
 /** 내려가는 속도 1m/s 당 카빙 힘 증가율 */
 const CARVE_SPEED_BOOST = 0.3;
 const DAMP_X = 1.2;
-const TURN_RATE = 1.8;
+/** 한 발에 체중을 싣고 반대쪽 끝을 밀 때의 회전 속도 */
+const STEER_RATE = 6;
+/** 양발에 고르게 싣고 좌우로 실었을 때 옆으로 평행 이동하는 힘 */
+const LATERAL_FORCE = 6;
 const SPIN_RATE = 9;
 const BODY_SPIN_RATE = 7;
 const WEATHERVANE = 2;
@@ -60,7 +63,7 @@ const BOARD_BALANCE = -0.4;
 /** 균형점에서 하중 지점이 이만큼 벗어나면 예전 하중 1 과 같은 힘 */
 const LEVER_NORM = 0.5;
 /** 하중 지점이 균형점보다 뒤로 갈수록(노즈가 들릴수록) 회전이 빨라지는 정도 */
-const NOSE_LIFT_TURN_BOOST = 1;
+const NOSE_LIFT_TURN_BOOST = 0.5;
 const POP_BASE = 2.5;
 const POP_CROUCH = 3;
 const LAND_TOLERANCE = (35 * Math.PI) / 180;
@@ -100,7 +103,7 @@ export interface RiderState {
   comSide: number;
   comVDown: number;
   comVSide: number;
-  /** 물에 박힌 엣지. -1 ~ 1 (부호 = 화면 왼쪽/오른쪽) */
+  /** 물에 박힌 엣지(보드 폭 방향 하중). -1 ~ 1 */
   edge: number;
   /** 이번 점프/바닥 회전에서 누적 회전(rad). 보드가 다시 정렬되면 집계 */
   boardRotation: number;
@@ -197,11 +200,19 @@ const frontFootAxis = (bodyHeading: number) => ({ x: Math.cos(bodyHeading), y: M
  * 하중 지점: 몸 무게중심이 두 발 사이 어디에 실렸는지에 따라 보드를 누르는 위치(반길이 단위, 앞발 방향 +).
  * 무게중심을 앞발 쪽으로 옮길수록 앞발 위치에, 뒤로 옮길수록 뒷발 위치에 가까워진다.
  */
-export const pressurePoint = (s: RiderState, feet: FootSetup) => {
+/** 앞발에 실린 체중 비율 0 ~ 1 (0.5 = 양발에 고르게) */
+const frontShare = (s: RiderState) => {
   const axis = frontFootAxis(s.bodyHeading);
   const toward = s.comSide * axis.x - s.comDown * axis.y;
-  const frontShare = Math.max(0, Math.min(1, (1 + toward) / 2));
-  return feet.back + (feet.front - feet.back) * frontShare;
+  return Math.max(0, Math.min(1, (1 + toward) / 2));
+};
+
+export const pressurePoint = (s: RiderState, feet: FootSetup) => feet.back + (feet.front - feet.back) * frontShare(s);
+
+/** 보드 폭 방향(앞발 방향을 반시계로 90°) 하중. + 면 그쪽으로 보드를 민다 */
+const acrossLean = (s: RiderState) => {
+  const axis = frontFootAxis(s.bodyHeading);
+  return s.comSide * -axis.y + -s.comDown * axis.x;
 };
 
 export function stepRider(s: RiderState, input: RiderInput, dt: number, feet: FootSetup = DEFAULT_FEET): RiderEvent[] {
@@ -244,23 +255,33 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number, feet: Fo
     s.boardSpin += (input.yaw * SPIN_RATE + s.bodySpin - s.boardSpin) * Math.min(1, 4 * dt);
     s.vx -= DAMP_X * 0.2 * s.vx * dt;
   } else {
-    // 엣지는 물에 서서히 박힌다. 보드가 옆으로 설수록 카빙은 안 먹힌다
-    s.edge += (s.comSide - s.edge) * Math.min(1, EDGE_ENGAGE_RATE * flowSpeed * dt);
-    // 경사 아래쪽 끝이 엣지 쪽으로 돈다. 스핀 입력이 없으면 물살이 보드를 가까운 흐름 축(0 또는 π)으로 되돌린다
-    // 트윈팁이라 sin(2θ): 180 은 180 에서 멈춘다
+    // 보드 폭 방향 하중(엣지)은 물에 서서히 박힌다
+    s.edge += (acrossLean(s) - s.edge) * Math.min(1, EDGE_ENGAGE_RATE * flowSpeed * dt);
+    // 앞뒤 체중 배분: -1 = 뒷발에만, 0 = 고르게, +1 = 앞발에만
+    const along = 2 * frontShare(s) - 1;
+    const across = frontFootAxis(s.bodyHeading);
+
+    // 양발에 고르게 실으면 엣지 방향으로 보드 방향 그대로 평행 이동한다
+    const carveBoost = 1 + CARVE_SPEED_BOOST * Math.max(0, -s.vy);
+    const lateral = LATERAL_FORCE * carveBoost * s.edge * (1 - Math.abs(along));
+    s.vx += lateral * -across.y * dt;
+    s.vy += lateral * across.x * dt;
+
+    // 회전은 한 발에 체중이 쏠렸을 때만: 체중 실린 발이 축이 되고(아래 피벗), 빠진 쪽 끝이 엣지 방향으로 밀린다.
+    // 뒷발에 싣고 밀면 노즈가, 앞발에 싣고 밀면 테일이 그쪽으로 간다
+    // 뒤에 실어 노즈가 들리면 물에 잠긴 면이 줄어 더 잘 돈다
+    const noseLift = Math.max(0, Math.min(1, -trim / LEVER_NORM));
+    const steer = STEER_RATE * s.edge * -along * (1 + NOSE_LIFT_TURN_BOOST * noseLift);
+    // 스핀 입력이 없으면 물살이 보드를 가까운 흐름 축(0 또는 π)으로 되돌린다. 트윈팁이라 sin(2θ)
     // 발이 붙어 있으니 보드만 돌리는 입력(yaw)은 먹히지 않고, 몸을 돌려야(bodyYaw) 보드째 돈다
     const twisting = Math.min(1, Math.abs(input.bodyYaw));
-    // 뒤에 실어 노즈가 들리면 물에 잠긴 면이 줄어 빨리 돌고, 앞에 실으면 넓고 부드럽게 돈다
-    const noseLift = Math.max(0, Math.min(1, -trim / LEVER_NORM));
-    const carve = s.edge * TURN_RATE * (1 + NOSE_LIFT_TURN_BOOST * noseLift) * Math.abs(Math.cos(s.boardHeading));
     const realign = WEATHERVANE * Math.sin(2 * s.boardHeading) / 2;
-    const targetSpin = carve + input.bodyYaw * BODY_SPIN_RATE - realign * (1 - twisting);
+    const targetSpin = steer + input.bodyYaw * BODY_SPIN_RATE - realign * (1 - twisting);
     // 몸으로 비트는 스핀은 즉각적이고, 엣지로 도는 회전은 속도가 붙어야 빨라진다
     const response = twisting > 0.1 ? 8 : TURN_RESPONSE * flowSpeed;
     s.boardSpin += (targetSpin - s.boardSpin) * Math.min(1, response * dt);
-    // 보드는 자기 축을 따라 미끄러진다. 축은 heading 과 heading+π 가 같으므로 sin·cos(주기 π)
+    // 보드가 틀어져 있으면 자기 축을 따라 미끄러진다. 축은 heading 과 heading+π 가 같으므로 sin·cos(주기 π)
     // 내려오며 얻은 속도는 옆으로 치고 나가는 힘이 된다
-    const carveBoost = 1 + CARVE_SPEED_BOOST * Math.max(0, -s.vy);
     s.vx += (CARVE_FORCE * carveBoost * Math.sin(s.boardHeading) * Math.cos(s.boardHeading) - DAMP_X * s.vx) * dt;
   }
   // 바닥에서는 보드가 하중 지점을 축으로 돈다: 뒷발에 실으면 테일 피벗, 앞발에 실으면 중심 근처에서 돈다
