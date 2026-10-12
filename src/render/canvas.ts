@@ -3,6 +3,8 @@ import { SHEET, slopeAngle, type RiderState } from '../physics/rider';
 
 const BOARD_LEN = 1.3;
 const BOARD_W = 0.45;
+/** 무게중심 1 이 화면에서 보드 중심으로부터 떨어지는 거리(m) */
+const COM_REACH = 0.35;
 
 export interface Hud {
   locked: boolean;
@@ -96,7 +98,7 @@ export class CanvasRenderer {
     // 그림자
     ctx.save();
     ctx.translate(px, py);
-    ctx.rotate(-s.heading); // heading+ = 노즈가 +x(화면 오른쪽)로
+    ctx.rotate(-s.boardHeading); // heading+ = +x(화면 오른쪽)로 돈다
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
     ctx.beginPath();
     ctx.ellipse(0, 0, (BOARD_W / 2) * this.scale, (BOARD_LEN / 2) * this.scale, 0, 0, Math.PI * 2);
@@ -106,7 +108,7 @@ export class CanvasRenderer {
     // 보드 (공중에선 위로 띄워 그림)
     ctx.save();
     ctx.translate(px, py - s.z * this.scale * 0.6);
-    ctx.rotate(-s.heading); // heading+ = 노즈가 +x(화면 오른쪽)로
+    ctx.rotate(-s.boardHeading); // heading+ = +x(화면 오른쪽)로 돈다
     ctx.scale(lift, lift);
     // 레일이 물에 파고들수록 빨갛게
     ctx.fillStyle = s.wipeout ? '#c0392b' : `hsl(${34 - s.edgeLoad * 34}, 100%, ${64 - s.edgeLoad * 14}%)`;
@@ -118,11 +120,40 @@ export class CanvasRenderer {
     ctx.roundRect(-bw / 2, -bl / 2, bw, bl, bw / 2);
     ctx.fill();
     ctx.stroke();
-    // 노즈 표시 (heading 0 = 화면 아래)
-    ctx.fillStyle = '#1b1b1b';
+    // 트윈팁: 앞뒤 구분 없이 양 끝에 같은 표시
+    ctx.fillStyle = 'rgba(27,27,27,0.5)';
+    for (const end of [-1, 1]) {
+      ctx.beginPath();
+      ctx.arc(0, end * (bl / 2 - bw * 0.35), bw * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    this.drawBody(s, px, py - s.z * this.scale * 0.6, lift);
+  }
+
+  /** 몸: 실제 무게중심 위치에 어깨선 + 머리(바라보는 쪽) */
+  private drawBody(s: RiderState, px: number, py: number, lift: number) {
+    const { ctx } = this;
+    ctx.save();
+    ctx.translate(px + s.comSide * COM_REACH * this.scale, py + s.comDown * COM_REACH * this.scale);
+    ctx.rotate(-s.bodyHeading);
+    ctx.scale(lift, lift);
+    const shoulder = 0.25 * this.scale;
+    ctx.strokeStyle = '#2f3542';
+    ctx.lineWidth = 0.14 * this.scale;
+    ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.arc(0, bl / 2 - bw * 0.35, bw * 0.12, 0, Math.PI * 2);
+    ctx.moveTo(-shoulder, 0);
+    ctx.lineTo(shoulder, 0);
+    ctx.stroke();
+    ctx.fillStyle = '#f1c27d';
+    ctx.strokeStyle = '#2f3542';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0.09 * this.scale, 0.1 * this.scale, 0, Math.PI * 2);
     ctx.fill();
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -148,7 +179,7 @@ export class CanvasRenderer {
     // 패드 안의 보드: 실제 보드와 같이 돌아서, 무게가 어느 레일에 실렸는지 보인다
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.rotate(-s.heading);
+    ctx.rotate(-s.boardHeading);
     ctx.strokeStyle = `rgba(255,${180 - s.edgeLoad * 180},${120 - s.edgeLoad * 120},0.8)`;
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -156,16 +187,22 @@ export class CanvasRenderer {
     ctx.stroke();
     ctx.restore();
 
+    // 목표(마우스) = 주황 점, 실제 몸 무게중심 = 흰 고리. 둘 사이의 간격이 몸의 지연
     ctx.fillStyle = '#ffb347';
     ctx.beginPath();
-    ctx.arc(cx + hud.cop.x * (size / 2), cy + hud.cop.y * (size / 2), 7, 0, Math.PI * 2);
+    ctx.arc(cx + hud.cop.x * (size / 2), cy + hud.cop.y * (size / 2), 6, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx + s.comSide * (size / 2), cy + s.comDown * (size / 2), 9, 0, Math.PI * 2);
+    ctx.stroke();
 
     ctx.font = '12px system-ui, sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
     ctx.textAlign = 'center';
-    ctx.fillText('뒤 (경사 위)', cx, cy - size / 2 - 6);
-    ctx.fillText('앞 (경사 아래)', cx, cy + size / 2 + 14);
+    ctx.fillText('경사 위', cx, cy - size / 2 - 6);
+    ctx.fillText('경사 아래', cx, cy + size / 2 + 14);
 
     // 레일 파고듦 게이지
     const ex = cx + size / 2 + 12;
@@ -184,6 +221,11 @@ export class CanvasRenderer {
     ctx.fillRect(cx - size / 2, cy - size / 2 - 32, size, 8);
     ctx.fillStyle = '#70a1ff';
     ctx.fillRect(cx, cy - size / 2 - 32, (hud.input.yaw * size) / 2, 8);
+    // 몸 회전 게이지
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(cx - size / 2, cy - size / 2 - 44, size, 8);
+    ctx.fillStyle = '#a29bfe';
+    ctx.fillRect(cx, cy - size / 2 - 44, (hud.input.bodyYaw * size) / 2, 8);
 
     ctx.textAlign = 'left';
     ctx.font = 'bold 20px system-ui, sans-serif';
@@ -205,13 +247,15 @@ export class CanvasRenderer {
       ctx.fillText('클릭해서 시작', W / 2, H / 2 - 60);
       ctx.font = '16px system-ui, sans-serif';
       const lines = [
-        '마우스 아래/위: 앞/뒤 하중 (내려가기/올라가기)',
-        '마우스 좌/우: 힐/토 엣지 (카빙)',
+        '마우스 아래/위: 경사 아래/위로 무게 (내려가기/올라가기)',
+        '마우스 좌/우: 좌우로 무게 (카빙) — 몸이 따라오는 데 시간이 걸린다',
         '좌클릭 누르고 떼기: 웅크렸다 점프',
-        '우클릭 드래그 또는 휠: 스핀 (보드가 돌 땐 무게를 뒤에! 앞에 실으면 레일이 걸려 고꾸라짐)',
+        '우클릭 드래그 또는 휠: 보드만 돌리기 (샤빗)',
+        'Shift + 우클릭 드래그 또는 Shift + 휠: 몸 돌리기 (보드도 같이)',
+        '보드가 돌 땐 무게를 경사 위에! 아래로 실으면 레일이 걸려 고꾸라짐',
         'ESC: 일시정지',
       ];
-      lines.forEach((l, i) => ctx.fillText(l, W / 2, H / 2 - 10 + i * 26));
+      lines.forEach((l, i) => ctx.fillText(l, W / 2, H / 2 - 20 + i * 26));
     }
   }
 }

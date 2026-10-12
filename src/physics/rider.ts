@@ -4,9 +4,14 @@ import type { RiderInput } from '../input/types';
  * 시트 웨이브 위 보드의 단순화된 2.5D 모델.
  * 좌표: x = 폭 방향(m, 0이 중앙), y = 경사면을 따라 올라가는 거리(m, 0 = 바닥, LENGTH = 크레스트), z = 공중 높이.
  * 물은 +y 로 흐르며 보드를 위로 밀고, 중력은 경사가 급해질수록 아래로 끌어내린다.
- * heading 0 = 노즈가 경사 아래(-y)를 향함. 양수면 노즈가 +x 쪽으로 돈다.
+ * 방향(heading) 0 = 경사 아래(-y)를 향함. 양수면 +x 쪽으로 돈다.
  *
- * 하중(lean)은 월드 기준이다. 서피스 360 동안 보드는 발밑에서 돌지만 상체는 경사 아래를 계속 바라보기 때문.
+ * 보드는 앞뒤 대칭(트윈팁)이라 boardHeading 과 boardHeading+π 는 같은 자세다.
+ * 앞뒤(레귤러/페이키)는 몸 방향 bodyHeading 으로만 정해진다.
+ * - 샤빗: 보드만 돈다 / 바디 회전: 몸과 보드가 함께 돈다
+ *
+ * 입력 하중은 몸 기준 "목표"다. 실제 몸 무게중심(com, 월드 기준)이 스프링처럼 그 목표를 따라가고,
+ * 보드에는 실제 무게중심만 전달된다. 그래서 무게를 실어도 바로 그쪽으로 가지 않는다.
  */
 export const SHEET = {
   WIDTH: 8,
@@ -26,17 +31,30 @@ const CARVE_SPEED_BOOST = 0.3;
 const DAMP_X = 1.2;
 const TURN_RATE = 1.8;
 const SPIN_RATE = 9;
+const BODY_SPIN_RATE = 7;
 const WEATHERVANE = 2;
+/** 바닥에서 몸이 흐름 축(경사 아래/위)으로 자세를 바로잡는 힘 */
+const BODY_SQUARE = 4;
 const POP_BASE = 2.5;
 const POP_CROUCH = 3;
 const LAND_TOLERANCE = (35 * Math.PI) / 180;
 /** 아래쪽 레일에 이 정도 하중까지는 버틴다 */
 const RAIL_LOAD_TOLERANCE = 0.2;
 /** 레일이 물을 파고드는 속도. edgeLoad 가 1 이 되면 고꾸라진다 */
-const RAIL_DIG_RATE = 6;
+const RAIL_DIG_RATE = 7;
 const RAIL_RECOVER_RATE = 1.5;
 
-export type WipeoutReason = 'over-the-top' | 'bad-landing' | 'edge-catch';
+/** 몸 무게중심 스프링. 고유진동수 ≈ √STIFFNESS rad/s, 감쇠비 ≈ DAMPING / (2√STIFFNESS) */
+const BODY_STIFFNESS = 30;
+const BODY_DAMPING = 6;
+/** 무게중심이 이 이상 밀려나면(목표는 최대 1) 균형을 잃는다 */
+const BALANCE_LIMIT = 1.2;
+/** 엣지가 물에 박히는 속도 (물에 대한 상대 속도 1 당) */
+const EDGE_ENGAGE_RATE = 4;
+/** 스핀 입력 없이 보드 회전 속도가 따라붙는 속도 (상대 속도 1 당) */
+const TURN_RESPONSE = 3;
+
+export type WipeoutReason = 'over-the-top' | 'bad-landing' | 'edge-catch' | 'off-balance';
 
 export interface RiderState {
   x: number;
@@ -45,20 +63,37 @@ export interface RiderState {
   vx: number;
   vy: number;
   vz: number;
-  heading: number;
-  spin: number;
-  /** 이번 점프에서 누적 회전(rad) */
-  airRotation: number;
-  /** 바닥에서 누적 회전(rad). 보드가 다시 정렬되면 서피스 스핀으로 집계 */
-  groundRotation: number;
+  boardHeading: number;
+  boardSpin: number;
+  bodyHeading: number;
+  bodySpin: number;
+  /** 실제 몸 무게중심(월드 기준, 정규화). down + = 경사 아래, side + = 화면 오른쪽 */
+  comDown: number;
+  comSide: number;
+  comVDown: number;
+  comVSide: number;
+  /** 물에 박힌 엣지. -1 ~ 1 (부호 = 화면 왼쪽/오른쪽) */
+  edge: number;
+  /** 이번 점프/바닥 회전에서 누적 회전(rad). 보드가 다시 정렬되면 집계 */
+  boardRotation: number;
+  bodyRotation: number;
   /** 0 ~ 1. 아래쪽 레일이 물에 파고든 정도 */
   edgeLoad: number;
   wipeout: WipeoutReason | null;
 }
 
+export interface Rotation {
+  /** 몸 회전 수 (0.5 단위) */
+  body: number;
+  /** 몸과 별개로 보드만 돈 회전 수 (0.5 단위) = 샤빗 */
+  shove: number;
+  /** 몸이 경사 위를 보고 있음 */
+  fakie: boolean;
+}
+
 export type RiderEvent =
-  | { type: 'land'; rotations: number; fakie: boolean }
-  | { type: 'surface-spin'; rotations: number; fakie: boolean }
+  | ({ type: 'land' } & Rotation)
+  | ({ type: 'surface-spin' } & Rotation)
   | { type: 'wipeout'; reason: WipeoutReason };
 
 export const slopeAngle = (y: number) => SHEET.MAX_SLOPE * Math.pow(Math.max(0, y) / SHEET.LENGTH, 1.5);
@@ -70,18 +105,41 @@ export const createRider = (): RiderState => ({
   vx: 0,
   vy: 0,
   vz: 0,
-  heading: 0,
-  spin: 0,
-  airRotation: 0,
-  groundRotation: 0,
+  boardHeading: 0,
+  boardSpin: 0,
+  bodyHeading: 0,
+  bodySpin: 0,
+  comDown: 0,
+  comSide: 0,
+  comVDown: 0,
+  comVSide: 0,
+  edge: 0,
+  boardRotation: 0,
+  bodyRotation: 0,
   edgeLoad: 0,
   wipeout: null,
 });
 
-/** 노즈 방향이 흐름 축(0 또는 π)에서 벗어난 각도 */
+/** 보드가 흐름 축(0 또는 π)에서 벗어난 각도 */
 const offAxis = (heading: number) => {
   const a = Math.abs(Math.atan2(Math.sin(heading), Math.cos(heading)));
   return Math.min(a, Math.PI - a);
+};
+
+const halfTurns = (rad: number) => Math.round(Math.abs(rad) / Math.PI) / 2;
+
+/** 몸 기준 하중 → 월드 기준 (down + = 경사 아래, side + = 화면 오른쪽) */
+export const bodyToWorld = (bodyHeading: number, forward: number, side: number) => {
+  const c = Math.cos(bodyHeading);
+  const s = Math.sin(bodyHeading);
+  return { down: forward * c - side * s, side: forward * s + side * c };
+};
+
+/** 월드 기준 → 몸 기준. 화면 방향으로 조작하는 장치(마우스)가 쓴다 */
+export const worldToBody = (bodyHeading: number, down: number, side: number) => {
+  const c = Math.cos(bodyHeading);
+  const s = Math.sin(bodyHeading);
+  return { forward: down * c + side * s, side: side * c - down * s };
 };
 
 /**
@@ -89,25 +147,44 @@ const offAxis = (heading: number) => {
  * 보드가 옆으로 설수록 레일이 흐름에 노출되고, 그 레일 쪽으로 무게를 실으면 파고든다.
  * 반대로 위쪽 레일에 무게를 두면(뒤로 버티면) 음수가 되어 안전하다.
  */
-export const downhillRailLoad = (heading: number, input: RiderInput) => {
-  const s = Math.sin(heading);
-  const c = Math.cos(heading);
+export const downhillRailLoad = (boardHeading: number, comDown: number, comSide: number) => {
+  const s = Math.sin(boardHeading);
+  const c = Math.cos(boardHeading);
   // 보드 수직축 t = (cos, sin) 중 경사 아래(-y)를 향하는 쪽에 실린 하중
-  const load = input.leanForward * Math.abs(s) - input.leanSide * c * Math.sign(s);
+  const load = comDown * Math.abs(s) - comSide * c * Math.sign(s);
   return Math.abs(s) * load;
 };
+
+const rotationSummary = (s: RiderState): Rotation => ({
+  body: halfTurns(s.bodyRotation),
+  shove: halfTurns(s.boardRotation - s.bodyRotation),
+  fakie: Math.cos(s.bodyHeading) < 0,
+});
 
 export function stepRider(s: RiderState, input: RiderInput, dt: number): RiderEvent[] {
   if (s.wipeout) return [];
   const events: RiderEvent[] = [];
   const airborne = s.z > 0 || s.vz > 0;
-  const broadside = Math.abs(Math.sin(s.heading));
+
+  // 몸: 목표 하중을 스프링·감쇠로 따라간다
+  const target = bodyToWorld(s.bodyHeading, input.leanForward, input.leanSide);
+  s.comVDown += (BODY_STIFFNESS * (target.down - s.comDown) - BODY_DAMPING * s.comVDown) * dt;
+  s.comVSide += (BODY_STIFFNESS * (target.side - s.comSide) - BODY_DAMPING * s.comVSide) * dt;
+  s.comDown += s.comVDown * dt;
+  s.comSide += s.comVSide * dt;
+  // 몸 회전. 바닥에서 몸을 돌리지 않을 땐 가까운 흐름 축으로 자세를 바로잡는다 (샤빗 중에도 몸은 그대로)
+  const square = airborne ? 0 : (BODY_SQUARE * Math.sin(2 * s.bodyHeading) / 2) * (1 - Math.min(1, Math.abs(input.bodyYaw)));
+  s.bodySpin += (input.bodyYaw * BODY_SPIN_RATE - square - s.bodySpin) * Math.min(1, 6 * dt);
+
+  // 물에 대한 상대 속도: 내려갈수록 물을 세게 받아 보드 반응이 빨라진다
+  const flowSpeed = 1 + Math.max(0, -s.vy);
+  const broadside = Math.abs(Math.sin(s.boardHeading));
 
   // 경사가 급한 위쪽일수록 하중 이동이 크게 먹힌다: 위에서 앞으로 실으면 확 떨어지며 가속하고, 평평한 바닥에선 둔하다
   const steepness = slopeAngle(s.y) / SHEET.MAX_SLOPE;
   const pitchGain = 0.4 + 1.6 * steepness;
   const push = FLOW_PUSH + BROADSIDE_PUSH * broadside;
-  const ay = push - G * Math.sin(slopeAngle(s.y)) - PITCH_FORCE * pitchGain * input.leanForward - DAMP_Y * s.vy;
+  const ay = push - G * Math.sin(slopeAngle(s.y)) - PITCH_FORCE * pitchGain * s.comDown - DAMP_Y * s.vy;
   s.vy += ay * dt;
   s.y += s.vy * dt;
   if (s.y < 0) {
@@ -115,24 +192,31 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number): RiderEv
     s.vy = Math.max(0, s.vy);
   }
 
+  const twisting = Math.min(1, Math.abs(input.yaw) + Math.abs(input.bodyYaw));
   if (airborne) {
     // 공중 회전은 입력을 따라가고, 놓으면 멈춘다 (착지 각도를 플레이어가 맞출 수 있게)
-    s.spin += (input.yaw * SPIN_RATE - s.spin) * Math.min(1, 4 * dt);
+    s.boardSpin += (input.yaw * SPIN_RATE + s.bodySpin - s.boardSpin) * Math.min(1, 4 * dt);
     s.vx -= DAMP_X * 0.2 * s.vx * dt;
   } else {
-    // 옆으로 실으면 경사 아래쪽 끝(레귤러면 노즈, 페이키면 테일)이 그쪽으로 돈다. 보드가 옆으로 설수록 카빙은 안 먹힌다
-    // 스핀 입력이 없으면 물살이 보드를 흐름 방향으로 되돌린다 (180 에서 놓으면 360 으로 마무리됨)
-    const carve = input.leanSide * TURN_RATE * Math.abs(Math.cos(s.heading));
-    const targetSpin = carve + input.yaw * SPIN_RATE - WEATHERVANE * Math.sin(s.heading) * (1 - Math.abs(input.yaw));
-    s.spin += (targetSpin - s.spin) * Math.min(1, 8 * dt);
+    // 엣지는 물에 서서히 박힌다. 보드가 옆으로 설수록 카빙은 안 먹힌다
+    s.edge += (s.comSide - s.edge) * Math.min(1, EDGE_ENGAGE_RATE * flowSpeed * dt);
+    // 경사 아래쪽 끝이 엣지 쪽으로 돈다. 스핀 입력이 없으면 물살이 보드를 가까운 흐름 축(0 또는 π)으로 되돌린다
+    // 트윈팁이라 sin(2θ): 샤빗 180 은 180 에서 멈춘다
+    const carve = s.edge * TURN_RATE * Math.abs(Math.cos(s.boardHeading));
+    const realign = WEATHERVANE * Math.sin(2 * s.boardHeading) / 2;
+    const targetSpin = carve + input.yaw * SPIN_RATE + s.bodySpin - realign * (1 - twisting);
+    // 발로 비트는 스핀은 즉각적이고, 엣지로 도는 회전은 속도가 붙어야 빨라진다
+    const response = twisting > 0.1 ? 8 : TURN_RESPONSE * flowSpeed;
+    s.boardSpin += (targetSpin - s.boardSpin) * Math.min(1, response * dt);
     // 보드는 자기 축을 따라 미끄러진다. 축은 heading 과 heading+π 가 같으므로 sin·cos(주기 π)
     // 내려오며 얻은 속도는 옆으로 치고 나가는 힘이 된다
     const carveBoost = 1 + CARVE_SPEED_BOOST * Math.max(0, -s.vy);
-    s.vx += (CARVE_FORCE * carveBoost * Math.sin(s.heading) * Math.cos(s.heading) - DAMP_X * s.vx) * dt;
+    s.vx += (CARVE_FORCE * carveBoost * Math.sin(s.boardHeading) * Math.cos(s.boardHeading) - DAMP_X * s.vx) * dt;
   }
-  s.heading += s.spin * dt;
-  if (airborne) s.airRotation += s.spin * dt;
-  else s.groundRotation += s.spin * dt;
+  s.boardHeading += s.boardSpin * dt;
+  s.bodyHeading += s.bodySpin * dt;
+  s.boardRotation += s.boardSpin * dt;
+  s.bodyRotation += s.bodySpin * dt;
 
   s.x += s.vx * dt;
   const halfW = SHEET.WIDTH / 2;
@@ -144,8 +228,8 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number): RiderEv
   // 점프
   if (!airborne && input.pop) {
     s.vz = POP_BASE + POP_CROUCH * input.crouch;
-    s.airRotation = 0;
-    s.groundRotation = 0;
+    s.boardRotation = 0;
+    s.bodyRotation = 0;
   }
   if (s.z > 0 || s.vz > 0) {
     s.vz -= G * dt;
@@ -153,29 +237,31 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number): RiderEv
     if (s.z <= 0) {
       s.z = 0;
       s.vz = 0;
-      if (offAxis(s.heading) > LAND_TOLERANCE) {
+      if (offAxis(s.boardHeading) > LAND_TOLERANCE) {
         s.wipeout = 'bad-landing';
       } else {
-        const fakie = Math.cos(s.heading) < 0;
-        events.push({ type: 'land', rotations: Math.round(Math.abs(s.airRotation) / Math.PI) / 2, fakie });
-        s.spin = 0;
-        s.groundRotation = 0;
+        events.push({ type: 'land', ...rotationSummary(s) });
+        s.boardSpin = 0;
+        s.boardRotation = 0;
+        s.bodyRotation = 0;
       }
     }
   } else {
-    // 레일 파고듦: 아래쪽 레일에 실린 하중이 허용치를 넘으면 쌓이고, 아니면 회복
-    const excess = downhillRailLoad(s.heading, input) - RAIL_LOAD_TOLERANCE;
+    // 레일 파고듦: 아래쪽 레일에 실린 실제 하중이 허용치를 넘으면 쌓이고, 아니면 회복
+    const excess = downhillRailLoad(s.boardHeading, s.comDown, s.comSide) - RAIL_LOAD_TOLERANCE;
     s.edgeLoad = Math.max(0, s.edgeLoad + (excess > 0 ? excess * RAIL_DIG_RATE : -RAIL_RECOVER_RATE) * dt);
     if (s.edgeLoad >= 1) s.wipeout = 'edge-catch';
 
-    // 서피스 스핀 집계: 보드가 흐름 방향으로 다시 정렬되어 안정되면 마감
-    if (offAxis(s.heading) < 0.25 && Math.abs(s.spin) < 1.5) {
-      const rotations = Math.round(Math.abs(s.groundRotation) / Math.PI) / 2;
-      if (rotations >= 0.5) events.push({ type: 'surface-spin', rotations, fakie: Math.cos(s.heading) < 0 });
-      s.groundRotation = 0;
+    // 바닥 회전 집계: 보드가 흐름 방향으로 다시 정렬되고 몸도 멈추면 마감
+    if (offAxis(s.boardHeading) < 0.25 && Math.abs(s.boardSpin) < 1.5 && Math.abs(s.bodySpin) < 0.5) {
+      const r = rotationSummary(s);
+      if (r.body >= 0.5 || r.shove >= 0.5) events.push({ type: 'surface-spin', ...r });
+      s.boardRotation = 0;
+      s.bodyRotation = 0;
     }
   }
 
+  if (Math.hypot(s.comDown, s.comSide) > BALANCE_LIMIT) s.wipeout = 'off-balance';
   if (s.y > SHEET.LENGTH) s.wipeout = 'over-the-top';
 
   if (s.wipeout) events.push({ type: 'wipeout', reason: s.wipeout });

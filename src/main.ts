@@ -1,6 +1,6 @@
 import { MouseInput } from './input/mouse';
 import { neutralInput } from './input/types';
-import { createRider, stepRider, type WipeoutReason } from './physics/rider';
+import { createRider, stepRider, type Rotation, type WipeoutReason } from './physics/rider';
 import { CanvasRenderer } from './render/canvas';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -11,7 +11,17 @@ const WIPEOUT_TEXT: Record<WipeoutReason, string> = {
   'over-the-top': '크레스트 너머로 넘어감!',
   'bad-landing': '착지 실패!',
   'edge-catch': '엣지 걸림!',
+  'off-balance': '균형 잃음!',
 };
+
+/** 예: "180", "샤빗 360", "180 + 샤빗 180", 앞에 "페이키" */
+const trickName = (r: Rotation) => {
+  const parts = [];
+  if (r.body >= 0.5) parts.push(`${r.body * 360}`);
+  if (r.shove >= 0.5) parts.push(`샤빗 ${r.shove * 360}`);
+  return `${r.fakie ? '페이키 ' : ''}${parts.join(' + ')}`;
+};
+const trickValue = (r: Rotation) => Math.round(r.body * 2) * 25 + Math.round(r.shove * 2) * 20;
 
 const FIXED_DT = 1 / 120;
 
@@ -32,7 +42,7 @@ function frame(now: number) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
 
-  const rawInput = input.locked ? input.read(dt) : neutralInput();
+  const rawInput = input.locked ? input.read(dt, { bodyHeading: rider.bodyHeading }) : neutralInput();
 
   if (input.locked) {
     accumulator += dt;
@@ -42,14 +52,13 @@ function frame(now: number) {
       popConsumed ||= rawInput.pop;
       for (const ev of stepRider(rider, stepInput, FIXED_DT)) {
         if (ev.type === 'land') {
-          const spin = ev.rotations >= 0.5 ? `${ev.rotations * 360} ` : '';
-          const gained = 10 + Math.round(ev.rotations * 2) * 25;
+          const gained = 10 + trickValue(ev);
           score += gained;
-          flash(`${spin}${ev.fakie ? '페이키 ' : ''}착지 +${gained}`);
+          flash(`${trickName(ev)} 착지 +${gained}`.trim());
         } else if (ev.type === 'surface-spin') {
-          const gained = Math.round(ev.rotations * 2) * 20;
+          const gained = trickValue(ev);
           score += gained;
-          flash(`서피스 ${ev.rotations * 360}${ev.fakie ? ' (페이키)' : ''} +${gained}`);
+          flash(`서피스 ${trickName(ev)} +${gained}`);
         } else {
           flash(WIPEOUT_TEXT[ev.reason], 1.5);
           resetTimer = 1.5;

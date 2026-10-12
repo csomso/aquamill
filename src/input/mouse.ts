@@ -1,17 +1,20 @@
-import type { InputSource, RiderInput } from './types';
+import { worldToBody } from '../physics/rider';
+import type { InputContext, InputSource, RiderInput } from './types';
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
 /**
- * 마우스 = 보드 위 압력중심(Center of Pressure).
- * - 이동: 화면 방향 그대로의 하중. 아래 = 경사 아래(앞), 위 = 경사 위(뒤), 좌우 = 좌우
- * - 우클릭 드래그 좌우 / 휠: 스핀(yaw)
+ * 마우스 = 목표 무게중심. 화면 방향 그대로다(아래 = 경사 아래, 위 = 경사 위, 좌우 = 좌우).
+ * 몸이 돌아가도 화면 기준이 유지되도록 read() 에서 몸 기준으로 변환해 넘긴다.
+ * - 우클릭 드래그 좌우 / 휠: 보드만 돌리기(샤빗, yaw)
+ * - Shift + 우클릭 드래그 / Shift + 휠: 몸 돌리기(bodyYaw, 보드도 같이)
  * - 좌클릭 누름: 웅크림, 뗌: pop
- * 입력이 없으면 압력중심이 중앙으로 스프링처럼 돌아온다.
+ * 입력이 없으면 목표 무게중심이 중앙으로 천천히 돌아온다.
  */
 export class MouseInput implements InputSource {
   private cop = { x: 0, y: 0 };
   private yaw = 0;
+  private bodyYaw = 0;
   private crouch = 0;
   private crouching = false;
   private popQueued = false;
@@ -41,11 +44,12 @@ export class MouseInput implements InputSource {
     return this.cop;
   }
 
-  read(dt: number): RiderInput {
+  read(dt: number, ctx: InputContext): RiderInput {
     const k = Math.exp(-this.springRate * dt);
     this.cop.x *= k;
     this.cop.y *= k;
     this.yaw *= Math.exp(-this.yawDecay * dt);
+    this.bodyYaw *= Math.exp(-this.yawDecay * dt);
 
     if (this.crouching) this.crouch = Math.min(1, this.crouch + dt * 2.5);
 
@@ -56,7 +60,8 @@ export class MouseInput implements InputSource {
       this.crouch = 0;
     }
 
-    return { leanForward: this.cop.y, leanSide: this.cop.x, yaw: this.yaw, crouch, pop };
+    const lean = worldToBody(ctx.bodyHeading, this.cop.y, this.cop.x);
+    return { leanForward: lean.forward, leanSide: lean.side, yaw: this.yaw, bodyYaw: this.bodyYaw, crouch, pop };
   }
 
   dispose(): void {
@@ -77,11 +82,19 @@ export class MouseInput implements InputSource {
   private onMove = (e: MouseEvent) => {
     if (!this.locked) return;
     if (this.spinning) {
-      this.yaw = clamp(this.yaw + e.movementX * this.sensitivity * 1.5, -1, 1);
+      const torque = e.movementX * this.sensitivity * 1.5;
+      if (e.shiftKey) this.bodyYaw = clamp(this.bodyYaw + torque, -1, 1);
+      else this.yaw = clamp(this.yaw + torque, -1, 1);
       return;
     }
-    this.cop.x = clamp(this.cop.x + e.movementX * this.sensitivity, -1, 1);
-    this.cop.y = clamp(this.cop.y + e.movementY * this.sensitivity, -1, 1);
+    this.cop.x += e.movementX * this.sensitivity;
+    this.cop.y += e.movementY * this.sensitivity;
+    // 원 안으로 제한: 대각선이라고 더 멀리 실리지 않게
+    const r = Math.hypot(this.cop.x, this.cop.y);
+    if (r > 1) {
+      this.cop.x /= r;
+      this.cop.y /= r;
+    }
   };
 
   private onDown = (e: MouseEvent) => {
@@ -101,6 +114,8 @@ export class MouseInput implements InputSource {
 
   private onWheel = (e: WheelEvent) => {
     if (!this.locked) return;
-    this.yaw = clamp(this.yaw + Math.sign(e.deltaY) * 0.35, -1, 1);
+    const torque = Math.sign(e.deltaY) * 0.35;
+    if (e.shiftKey) this.bodyYaw = clamp(this.bodyYaw + torque, -1, 1);
+    else this.yaw = clamp(this.yaw + torque, -1, 1);
   };
 }
