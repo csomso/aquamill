@@ -4,7 +4,7 @@ const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(mi
 
 /**
  * 마우스 = 보드 위 압력중심(Center of Pressure).
- * - 이동: 위 = 앞발(pitch+), 좌우 = 힐/토(roll)
+ * - 이동: 아래 = 앞발(pitch+, 화면의 보드 노즈 방향), 위 = 뒷발, 좌우 = 힐/토(roll)
  * - 우클릭 드래그 좌우 / 휠: 스핀(yaw)
  * - 좌클릭 누름: 웅크림, 뗌: pop
  * 입력이 없으면 압력중심이 중앙으로 스프링처럼 돌아온다.
@@ -20,7 +20,7 @@ export class MouseInput implements InputSource {
   /** 픽셀 → 정규화 감도 */
   sensitivity = 0.006;
   /** 초당 중앙 복원 비율 */
-  springRate = 2.5;
+  springRate = 0.35;
   yawDecay = 6;
 
   constructor(private readonly target: HTMLElement) {
@@ -56,7 +56,7 @@ export class MouseInput implements InputSource {
       this.crouch = 0;
     }
 
-    return { pitch: -this.cop.y, roll: this.cop.x, yaw: this.yaw, crouch, pop };
+    return { pitch: this.cop.y, roll: this.cop.x, yaw: this.yaw, crouch, pop };
   }
 
   dispose(): void {

@@ -152,8 +152,8 @@ export class CanvasRenderer {
     ctx.font = '12px system-ui, sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
     ctx.textAlign = 'center';
-    ctx.fillText('앞발', cx, cy - size / 2 - 6);
-    ctx.fillText('뒷발', cx, cy + size / 2 + 14);
+    ctx.fillText('뒷발', cx, cy - size / 2 - 6);
+    ctx.fillText('앞발', cx, cy + size / 2 + 14);
 
     // 웅크림 / 스핀 게이지
     const gx = cx - size / 2 - 22;
@@ -186,7 +186,7 @@ export class CanvasRenderer {
       ctx.fillText('클릭해서 시작', W / 2, H / 2 - 60);
       ctx.font = '16px system-ui, sans-serif';
       const lines = [
-        '마우스 위/아래: 앞발/뒷발 하중 (내려가기/올라가기)',
+        '마우스 아래/위: 앞발/뒷발 하중 (내려가기/올라가기)',
         '마우스 좌/우: 힐/토 엣지 (카빙)',
         '좌클릭 누르고 떼기: 웅크렸다 점프',
         '우클릭 드래그 또는 휠: 스핀',

@@ -14,9 +14,11 @@ export const SHEET = {
 
 const G = 9.8;
 const FLOW_PUSH = 3;
-const PITCH_FORCE = 3;
-const DAMP_Y = 1.5;
+const PITCH_FORCE = 3.5;
+const DAMP_Y = 0.8;
 const CARVE_FORCE = 8;
+/** 내려가는 속도 1m/s 당 카빙 힘 증가율 */
+const CARVE_SPEED_BOOST = 0.3;
 const DAMP_X = 1.2;
 const TURN_RATE = 1.8;
 const SPIN_RATE = 9;
@@ -73,7 +75,10 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number): RiderEv
   const airborne = s.z > 0 || s.vz > 0;
 
   // 경사 방향: 물에 밀려 올라가고, 중력·앞발 하중으로 내려온다
-  const ay = FLOW_PUSH - G * Math.sin(slopeAngle(s.y)) - PITCH_FORCE * input.pitch - DAMP_Y * s.vy;
+  // 경사가 급한 위쪽일수록 하중 이동이 크게 먹힌다: 위에서 앞발을 실으면 확 떨어지며 가속하고, 평평한 바닥에선 둔하다
+  const steepness = slopeAngle(s.y) / SHEET.MAX_SLOPE;
+  const pitchGain = 0.4 + 1.6 * steepness;
+  const ay = FLOW_PUSH - G * Math.sin(slopeAngle(s.y)) - PITCH_FORCE * pitchGain * input.pitch - DAMP_Y * s.vy;
   s.vy += ay * dt;
   s.y += s.vy * dt;
   if (s.y < 0) {
@@ -90,7 +95,9 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number): RiderEv
     const targetSpin = input.roll * TURN_RATE + input.yaw * SPIN_RATE - WEATHERVANE * Math.sin(s.heading) * (1 - Math.abs(input.yaw));
     s.spin += (targetSpin - s.spin) * Math.min(1, 8 * dt);
     // 보드는 자기 축을 따라 미끄러진다. 축은 heading 과 heading+π 가 같으므로 sin·cos(주기 π)
-    s.vx += (CARVE_FORCE * Math.sin(s.heading) * Math.cos(s.heading) - DAMP_X * s.vx) * dt;
+    // 내려오며 얻은 속도는 옆으로 치고 나가는 힘이 된다
+    const carveBoost = 1 + CARVE_SPEED_BOOST * Math.max(0, -s.vy);
+    s.vx += (CARVE_FORCE * carveBoost * Math.sin(s.heading) * Math.cos(s.heading) - DAMP_X * s.vx) * dt;
   }
   s.heading += s.spin * dt;
   if (airborne) s.airRotation += s.spin * dt;
