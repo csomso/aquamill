@@ -10,7 +10,7 @@ export interface RiderInput {
   leanForward: number;
   /** 목표 좌우 하중(몸 기준). +1 = 몸의 오른쪽 */
   leanSide: number;
-  /** 발로 보드만 비트는 토크(샤빗). -1 ~ 1 */
+  /** 발로 보드만 차는 토크(샤빗). -1 ~ 1. 점프(pop) 순간의 값만 보드 회전에 쓰인다 */
   yaw: number;
   /** 몸을 돌리는 토크. 보드도 함께 돈다. -1 ~ 1 */
   bodyYaw: number;

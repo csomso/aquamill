@@ -35,7 +35,8 @@ const DAMP_X = 1.2;
 const STEER_RATE = 6;
 /** 양발에 고르게 싣고 좌우로 실었을 때 옆으로 평행 이동하는 힘 */
 const LATERAL_FORCE = 6;
-const SPIN_RATE = 9;
+/** 점프 순간 발로 보드를 차서 주는 회전 속도(rad/s, yaw 1 기준). 공중에선 이 각속도가 그대로 유지된다 */
+const SHOVE_IMPULSE = 9;
 const BODY_SPIN_RATE = 7;
 const WEATHERVANE = 2;
 /** 레귤러 스탠스의 몸 방향: 가슴이 화면 왼쪽(-x) */
@@ -96,6 +97,8 @@ export interface RiderState {
   boardSpin: number;
   bodyHeading: number;
   bodySpin: number;
+  /** 점프 순간 보드를 차서(샤빗) 발에서 떨어졌는지. 아니면 공중에서도 발에 붙어 몸과 같이 돈다 */
+  boardKicked: boolean;
   /** 바닥에서 보드 대비 몸 방향(±π/2). 착지할 때마다 다시 정해진다 */
   stance: number;
   /** 실제 몸 무게중심(월드 기준, 정규화). down + = 경사 아래, side + = 화면 오른쪽 */
@@ -140,6 +143,7 @@ export const createRider = (): RiderState => ({
   boardSpin: 0,
   bodyHeading: REGULAR_BODY_HEADING,
   stance: REGULAR_BODY_HEADING,
+  boardKicked: false,
   bodySpin: 0,
   comDown: 0,
   comSide: 0,
@@ -251,8 +255,9 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number, feet: Fo
   }
 
   if (airborne) {
-    // 공중 회전은 입력을 따라가고, 놓으면 멈춘다 (착지 각도를 플레이어가 맞출 수 있게)
-    s.boardSpin += (input.yaw * SPIN_RATE + s.bodySpin - s.boardSpin) * Math.min(1, 4 * dt);
+    // 찬 보드는 발에서 떨어져 점프 순간 받은 각속도 그대로 돈다 (공중에서 바꿀 수 없음).
+    // 차지 않았으면 발이 보드를 누르고 있어 몸과 같이 돈다
+    if (!s.boardKicked) s.boardSpin = s.bodySpin;
     s.vx -= DAMP_X * 0.2 * s.vx * dt;
   } else {
     // 보드 폭 방향 하중(엣지)은 물에 서서히 박힌다
@@ -313,6 +318,9 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number, feet: Fo
   // 점프
   if (!airborne && input.pop) {
     s.vz = POP_BASE + POP_CROUCH * input.crouch;
+    // 샤빗: 뛰어오르는 순간 발로 보드를 차서 준 토크만큼만 보드가 돈다
+    s.boardKicked = Math.abs(input.yaw) > 0.05;
+    s.boardSpin += input.yaw * SHOVE_IMPULSE;
     s.boardRotation = 0;
     s.bodyRotation = 0;
   }
@@ -329,6 +337,7 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number, feet: Fo
         s.wipeout = 'bad-landing';
       } else {
         s.stance = Math.sign(rel) * (Math.PI / 2);
+        s.boardKicked = false;
         s.bodyHeading = s.boardHeading + s.stance;
         s.bodySpin = 0;
         events.push({ type: 'land', ...rotationSummary(s) });

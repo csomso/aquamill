@@ -251,9 +251,8 @@ export class CanvasRenderer {
     ctx.fillRect(gx, cy + size / 2 - hud.input.crouch * size, 10, hud.input.crouch * size);
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fillRect(cx - size / 2, cy - size / 2 - 32, size, 8);
-    // 보드만 돌리기는 공중에서만 먹힌다
-    const grounded = s.z === 0 && s.vz === 0;
-    ctx.fillStyle = grounded ? 'rgba(112,161,255,0.3)' : '#70a1ff';
+    // 샤빗 토크는 웅크리는 동안 감아둘 때만 의미가 있다 (점프 순간 보드에 실림)
+    ctx.fillStyle = hud.input.crouch > 0 ? '#70a1ff' : 'rgba(112,161,255,0.3)';
     ctx.fillRect(cx, cy - size / 2 - 32, (hud.input.yaw * size) / 2, 8);
     // 몸 회전 게이지
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
@@ -285,7 +284,7 @@ export class CanvasRenderer {
         '마우스 좌/우: 양발 고르게면 보드 방향 그대로 옆으로 이동',
         '노즈 틀기: 위(뒷발)+좌/우 = 노즈가 그쪽으로, 아래(앞발)+좌/우 = 테일이 그쪽으로',
         '좌클릭 누르고 떼기: 웅크렸다 점프',
-        '우클릭 드래그 또는 휠: 점프 중 보드만 돌리기 (샤빗) — 바닥에선 발이 붙어 있어 안 돈다',
+        '샤빗: 좌클릭으로 웅크린 채 우클릭 드래그/휠로 토크를 감고, 좌클릭을 떼며 점프',
         'Shift + 우클릭 드래그 또는 Shift + 휠: 몸 돌리기 (바닥에선 보드째, 공중에선 몸만)',
         '보드가 돌 땐 무게를 경사 위에! 아래로 실으면 레일이 걸려 고꾸라짐',
         'ESC: 일시정지',

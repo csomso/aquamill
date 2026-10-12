@@ -6,7 +6,7 @@ const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(mi
 /**
  * 마우스 = 목표 무게중심. 화면 방향 그대로다(아래 = 경사 아래, 위 = 경사 위, 좌우 = 좌우).
  * 몸이 돌아가도 화면 기준이 유지되도록 read() 에서 몸 기준으로 변환해 넘긴다.
- * - 우클릭 드래그 좌우 / 휠: 보드만 돌리기(샤빗, yaw)
+ * - 웅크린 채 우클릭 드래그 좌우 / 휠: 샤빗 토크 감기(yaw). 웅크리는 동안은 줄지 않고, 점프하는 순간 보드에 실린다
  * - Shift + 우클릭 드래그 / Shift + 휠: 몸 돌리기(bodyYaw, 보드도 같이)
  * - 좌클릭 누름: 웅크림, 뗌: pop
  * 입력이 없으면 목표 무게중심이 중앙으로 천천히 돌아온다.
@@ -48,20 +48,23 @@ export class MouseInput implements InputSource {
     const k = Math.exp(-this.springRate * dt);
     this.cop.x *= k;
     this.cop.y *= k;
-    this.yaw *= Math.exp(-this.yawDecay * dt);
+    // 웅크리는 동안 감아둔 샤빗 토크는 점프할 때까지 유지
+    if (!this.crouching) this.yaw *= Math.exp(-this.yawDecay * dt);
     this.bodyYaw *= Math.exp(-this.yawDecay * dt);
 
     if (this.crouching) this.crouch = Math.min(1, this.crouch + dt * 2.5);
 
     const pop = this.popQueued;
     const crouch = this.crouch;
+    const yaw = this.yaw;
     if (pop) {
       this.popQueued = false;
       this.crouch = 0;
+      this.yaw = 0;
     }
 
     const lean = worldToBody(ctx.bodyHeading, this.cop.y, this.cop.x);
-    return { leanForward: lean.forward, leanSide: lean.side, yaw: this.yaw, bodyYaw: this.bodyYaw, crouch, pop };
+    return { leanForward: lean.forward, leanSide: lean.side, yaw, bodyYaw: this.bodyYaw, crouch, pop };
   }
 
   dispose(): void {
