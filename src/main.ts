@@ -44,6 +44,9 @@ let score = 0;
 let message: string | null = null;
 let messageTimer = 0;
 let resetTimer = 0;
+/** 넘어진 뒤 이 시간이 지나면 클릭으로 바로 다시 시작할 수 있다(넘어지는 순간의 클릭이 스킵되지 않게) */
+const SKIP_DELAY = 0.3;
+let resetDuration = 0;
 let accumulator = 0;
 let last = performance.now();
 
@@ -51,6 +54,20 @@ const flash = (text: string, seconds = 1.2) => {
   message = text;
   messageTimer = seconds;
 };
+
+const restart = () => {
+  rider = createRider();
+  score = 0;
+  resetTimer = 0;
+  message = null;
+  messageTimer = 0;
+  input.reset();
+};
+
+// MouseInput 의 mousedown 보다 뒤에 등록되므로, 이 클릭으로 시작된 웅크림은 reset() 이 지운다
+document.addEventListener('mousedown', () => {
+  if (input.locked && resetTimer > 0 && resetDuration - resetTimer >= SKIP_DELAY) restart();
+});
 
 function frame(now: number) {
   const dt = Math.min(0.1, (now - last) / 1000);
@@ -78,6 +95,7 @@ function frame(now: number) {
           const seconds = ev.details ? 3 : 1.5;
           flash(text, seconds);
           resetTimer = seconds;
+          resetDuration = seconds;
         }
       }
       accumulator -= FIXED_DT;
@@ -86,10 +104,7 @@ function frame(now: number) {
 
   if (resetTimer > 0) {
     resetTimer -= dt;
-    if (resetTimer <= 0) {
-      rider = createRider();
-      score = 0;
-    }
+    if (resetTimer <= 0) restart();
   }
   if (messageTimer > 0) {
     messageTimer -= dt;

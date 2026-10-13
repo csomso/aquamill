@@ -100,6 +100,21 @@ export class MouseInput implements InputSource {
     return Math.sign(v) * ((Math.abs(v) - dz) / (Math.abs(other) - dz)) * Math.abs(other);
   }
 
+  /** 다시 시작할 때 감아둔 토크·웅크림·무게중심을 모두 비운다 */
+  reset(): void {
+    this.cop.x = 0;
+    this.cop.y = 0;
+    this.yaw = 0;
+    this.flip = 0;
+    this.bodyYaw = 0;
+    this.crouch = 0;
+    this.crouching = false;
+    this.popQueued = false;
+    this.spinning = false;
+    this.burst.x = 0;
+    this.burst.y = 0;
+  }
+
   dispose(): void {
     this.target.removeEventListener('click', this.onClick);
     this.target.removeEventListener('contextmenu', this.preventDefault);
