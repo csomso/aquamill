@@ -184,6 +184,7 @@ const offAxis = (heading: number) => {
 const deg = (rad: number) => Math.round((rad * 180) / Math.PI);
 
 const halfTurns = (rad: number) => Math.round(Math.abs(rad) / Math.PI) / 2;
+const completedHalfTurns = (rad: number) => Math.floor((Math.abs(rad) + LAND_TOLERANCE) / Math.PI) / 2;
 
 /** 몸 기준 하중 → 월드 기준 (down + = 경사 아래, side + = 화면 오른쪽) */
 export const bodyToWorld = (bodyHeading: number, forward: number, side: number) => {
@@ -349,6 +350,11 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number, feet: Fo
     s.boardSpin += input.yaw * SHOVE_IMPULSE * kick;
     s.flipSpin = input.flip * FLIP_IMPULSE * kick;
     s.flip = 0;
+    // 바닥에서 돌던 게 마감되기 전에 뛰어도 서피스 회전은 인정한다.
+    // 아직 정렬 전이라 반올림 대신, 거의 다 돈(LAND_TOLERANCE 이내로 모자란) 180 만 센다
+    const body = completedHalfTurns(s.bodyRotation);
+    const shove = completedHalfTurns(s.boardRotation - s.bodyRotation);
+    if (body >= 0.5 || shove >= 0.5) events.push({ type: 'surface-spin', ...rotationSummary(s), body, shove, flips: 0 });
     s.boardRotation = 0;
     s.bodyRotation = 0;
   }
