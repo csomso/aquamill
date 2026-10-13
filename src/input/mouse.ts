@@ -40,6 +40,11 @@ export class MouseInput implements InputSource {
   burstStart = 30;
   /** 큰 이동량 중 이 비율만큼 다른 축 역치가 올라간다 */
   crossThreshold = 0.5;
+  /**
+   * 감아둔 전체 양 기준으로, 작은 축이 큰 축의 이 비율보다 작으면 0으로 친다.
+   * 넘는 부분은 다시 늘려서 정확한 대각선(배리얼)은 그대로 다 들어간다
+   */
+  crossDeadzone = 0.4;
 
   constructor(private readonly target: HTMLElement) {
     target.addEventListener('click', this.onClick);
@@ -74,8 +79,8 @@ export class MouseInput implements InputSource {
 
     const pop = this.popQueued;
     const crouch = this.crouch;
-    const yaw = this.yaw;
-    const flip = this.flip;
+    const yaw = this.suppressMinor(this.yaw, this.flip);
+    const flip = this.suppressMinor(this.flip, this.yaw);
     if (pop) {
       this.popQueued = false;
       this.crouch = 0;
@@ -85,6 +90,14 @@ export class MouseInput implements InputSource {
 
     const lean = worldToBody(ctx.bodyHeading, this.cop.y, this.cop.x);
     return { leanForward: lean.forward, leanSide: lean.side, yaw, flip, bodyYaw: this.bodyYaw, crouch, pop };
+  }
+
+  /** 천천히 끌기 시작할 때 섞여 들어간 작은 흔들림까지 걸러낸다 */
+  private suppressMinor(v: number, other: number): number {
+    const dz = this.crossDeadzone * Math.abs(other);
+    if (Math.abs(v) <= dz) return 0;
+    if (Math.abs(v) >= Math.abs(other)) return v;
+    return Math.sign(v) * ((Math.abs(v) - dz) / (Math.abs(other) - dz)) * Math.abs(other);
   }
 
   dispose(): void {
