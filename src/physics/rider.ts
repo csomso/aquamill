@@ -78,6 +78,8 @@ const NOSE_LIFT_TURN_BOOST = 0.5;
 const POP_BASE = 2.5;
 const POP_CROUCH = 3;
 const LAND_TOLERANCE = (35 * Math.PI) / 180;
+/** 착지 충격을 받아내려면 무게중심이 이 안쪽이어야 한다(평소 한계 BALANCE_LIMIT 보다 좁다) */
+const LAND_BALANCE_LIMIT = 0.7;
 /** 아래쪽 레일에 이 정도 하중까지는 버틴다 */
 const RAIL_LOAD_TOLERANCE = 0.2;
 /** 레일이 물을 파고드는 속도. edgeLoad 가 1 이 되면 고꾸라진다 */
@@ -353,12 +355,14 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number, feet: Fo
     if (s.z <= 0) {
       s.z = 0;
       s.vz = 0;
-      // 보드가 흐름 축에 맞고, 발이 보드 위에 옆으로 설 수 있는 각도여야 한다
+      // 보드가 흐름에 비스듬해도 괜찮다. 발이 보드 위에 옆으로 설 수 있는 각도이고 무게중심이 가운데 가까우면 선다.
+      // 비스듬히 선 뒤 아래쪽 레일에 무게가 실리면 레일 파고듦(edge-catch)이 이어받는다
       const rel = Math.atan2(Math.sin(s.bodyHeading - s.boardHeading), Math.cos(s.bodyHeading - s.boardHeading));
       const footError = Math.abs(Math.abs(rel) - Math.PI / 2);
       // 보드가 다시 바로 서 있어야 한다 (뒤집혔거나 옆으로 섰으면 실패)
       const flipError = Math.abs(Math.atan2(Math.sin(s.flip), Math.cos(s.flip)));
-      if (offAxis(s.boardHeading) > LAND_TOLERANCE || footError > LAND_TOLERANCE || flipError > FLIP_LAND_TOLERANCE) {
+      const centered = Math.hypot(s.comDown, s.comSide) <= LAND_BALANCE_LIMIT;
+      if (footError > LAND_TOLERANCE || flipError > FLIP_LAND_TOLERANCE || !centered) {
         s.wipeout = 'bad-landing';
       } else {
         s.stance = Math.sign(rel) * (Math.PI / 2);
