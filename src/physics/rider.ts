@@ -279,6 +279,8 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number, feet: Fo
   }
 
   if (airborne) {
+    // 발로 잡으면 샤빗이 그 각도에서 멈추고, 다시 발에 붙어 몸과 같이 돈다
+    if (input.catchBoard) s.boardKicked = false;
     // 찬 보드는 발에서 떨어져 점프 순간 받은 각속도 그대로 돈다 (공중에서 바꿀 수 없음).
     // 차지 않았으면 발이 보드를 누르고 있어 몸과 같이 돈다
     if (!s.boardKicked) s.boardSpin = s.bodySpin;

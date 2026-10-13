@@ -11,6 +11,7 @@ const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(mi
  *   한 축으로 크게 끌면 그동안 다른 축 역치가 올라가 살짝 흔들린 건 무시된다
  * - Shift + 우클릭 드래그 / Shift + 휠: 몸 돌리기(bodyYaw, 보드도 같이)
  * - 좌클릭 누름: 웅크림, 뗌: pop
+ * - 스페이스바(공중): 도는 보드를 발로 잡아 샤빗을 그 자리에서 멈춘다
  * 입력이 없으면 목표 무게중심이 중앙으로 천천히 돌아온다.
  */
 export class MouseInput implements InputSource {
@@ -21,6 +22,7 @@ export class MouseInput implements InputSource {
   private crouch = 0;
   private crouching = false;
   private popQueued = false;
+  private catchQueued = false;
   private spinning = false;
   /** 감기 드래그의 축별 최근 이동량(px). 시간이 지나면 줄어든다 */
   private burst = { x: 0, y: 0 };
@@ -53,6 +55,7 @@ export class MouseInput implements InputSource {
     document.addEventListener('mousedown', this.onDown);
     document.addEventListener('mouseup', this.onUp);
     document.addEventListener('wheel', this.onWheel, { passive: true });
+    document.addEventListener('keydown', this.onKeyDown);
   }
 
   get locked(): boolean {
@@ -78,6 +81,8 @@ export class MouseInput implements InputSource {
     if (this.crouching) this.crouch = Math.min(1, this.crouch + dt * 2.5);
 
     const pop = this.popQueued;
+    const catchBoard = this.catchQueued;
+    this.catchQueued = false;
     const crouch = this.crouch;
     const yaw = this.suppressMinor(this.yaw, this.flip);
     const flip = this.suppressMinor(this.flip, this.yaw);
@@ -89,7 +94,7 @@ export class MouseInput implements InputSource {
     }
 
     const lean = worldToBody(ctx.bodyHeading, this.cop.y, this.cop.x);
-    return { leanForward: lean.forward, leanSide: lean.side, yaw, flip, bodyYaw: this.bodyYaw, crouch, pop };
+    return { leanForward: lean.forward, leanSide: lean.side, yaw, flip, bodyYaw: this.bodyYaw, crouch, pop, catchBoard };
   }
 
   /** 천천히 끌기 시작할 때 섞여 들어간 작은 흔들림까지 걸러낸다 */
@@ -110,6 +115,7 @@ export class MouseInput implements InputSource {
     this.crouch = 0;
     this.crouching = false;
     this.popQueued = false;
+    this.catchQueued = false;
     this.spinning = false;
     this.burst.x = 0;
     this.burst.y = 0;
@@ -122,6 +128,7 @@ export class MouseInput implements InputSource {
     document.removeEventListener('mousedown', this.onDown);
     document.removeEventListener('mouseup', this.onUp);
     document.removeEventListener('wheel', this.onWheel);
+    document.removeEventListener('keydown', this.onKeyDown);
   }
 
   private onClick = () => {
@@ -174,6 +181,12 @@ export class MouseInput implements InputSource {
       if (!this.popQueued) this.crouch = 0;
     }
     if (e.button === 2) this.spinning = false;
+  };
+
+  private onKeyDown = (e: KeyboardEvent) => {
+    if (!this.locked || e.code !== 'Space') return;
+    e.preventDefault();
+    if (!e.repeat) this.catchQueued = true;
   };
 
   private onWheel = (e: WheelEvent) => {

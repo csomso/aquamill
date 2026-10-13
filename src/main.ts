@@ -48,6 +48,8 @@ let resetTimer = 0;
 const SKIP_DELAY = 0.3;
 let resetDuration = 0;
 let accumulator = 0;
+let pendingPop = false;
+let pendingCatch = false;
 let last = performance.now();
 
 const flash = (text: string, seconds = 1.2) => {
@@ -62,6 +64,8 @@ const restart = () => {
   message = null;
   messageTimer = 0;
   input.reset();
+  pendingPop = false;
+  pendingCatch = false;
 };
 
 // MouseInput 의 mousedown 보다 뒤에 등록되므로, 이 클릭으로 시작된 웅크림은 reset() 이 지운다
@@ -77,10 +81,13 @@ function frame(now: number) {
 
   if (input.locked) {
     accumulator += dt;
-    let popConsumed = false;
+    // 한 번만 쓰는 입력(pop, catchBoard)은 물리 스텝이 없는 프레임이면 다음 프레임으로 넘기고, 첫 스텝에서만 쓴다
+    pendingPop ||= rawInput.pop;
+    pendingCatch ||= rawInput.catchBoard;
     while (accumulator >= FIXED_DT) {
-      const stepInput = popConsumed ? { ...rawInput, pop: false } : rawInput;
-      popConsumed ||= rawInput.pop;
+      const stepInput = { ...rawInput, pop: pendingPop, catchBoard: pendingCatch };
+      pendingPop = false;
+      pendingCatch = false;
       for (const ev of stepRider(rider, stepInput, FIXED_DT, feet)) {
         if (ev.type === 'land') {
           const gained = 10 + trickValue(ev);

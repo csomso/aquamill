@@ -20,6 +20,8 @@ export interface RiderInput {
   crouch: number;
   /** 이번 프레임에 점프를 시도했는지 (crouch 를 놓은 순간) */
   pop: boolean;
+  /** 이번 프레임에 공중에서 도는 보드를 발로 잡았는지. 잡으면 샤빗이 멈추고 보드가 다시 몸과 같이 돈다 */
+  catchBoard: boolean;
 }
 
 /** 화면 기준 장치가 몸 기준으로 변환할 때 필요한 라이더 상태 */
@@ -33,4 +35,4 @@ export interface InputSource {
   dispose(): void;
 }
 
-export const neutralInput = (): RiderInput => ({ leanForward: 0, leanSide: 0, yaw: 0, flip: 0, bodyYaw: 0, crouch: 0, pop: false });
+export const neutralInput = (): RiderInput => ({ leanForward: 0, leanSide: 0, yaw: 0, flip: 0, bodyYaw: 0, crouch: 0, pop: false, catchBoard: false });
