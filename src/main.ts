@@ -74,8 +74,10 @@ function frame(now: number) {
           score += gained;
           flash(`서피스 ${trickName(ev)} +${gained}`);
         } else {
-          flash(WIPEOUT_TEXT[ev.reason], 1.5);
-          resetTimer = 1.5;
+          const text = [WIPEOUT_TEXT[ev.reason], ...(ev.details ?? [])].join('\n');
+          const seconds = ev.details ? 3 : 1.5;
+          flash(text, seconds);
+          resetTimer = seconds;
         }
       }
       accumulator -= FIXED_DT;

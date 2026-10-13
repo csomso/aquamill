@@ -39,12 +39,12 @@ export class MouseInput implements InputSource {
   /** 한 축의 최근 이동량이 이보다 크면 '크게 찼다'로 보고 다른 축 역치를 올린다(px) */
   burstStart = 30;
   /** 큰 이동량 중 이 비율만큼 다른 축 역치가 올라간다 */
-  crossThreshold = 0.5;
+  crossThreshold = 0.35;
   /**
    * 감아둔 전체 양 기준으로, 작은 축이 큰 축의 이 비율보다 작으면 0으로 친다.
    * 넘는 부분은 다시 늘려서 정확한 대각선(배리얼)은 그대로 다 들어간다
    */
-  crossDeadzone = 0.4;
+  crossDeadzone = 0.2;
 
   constructor(private readonly target: HTMLElement) {
     target.addEventListener('click', this.onClick);

@@ -280,8 +280,12 @@ export class CanvasRenderer {
 
     if (hud.message) {
       ctx.textAlign = 'center';
+      // 첫 줄은 크게, 나머지 줄(실패 이유 등)은 작게
+      const [title, ...lines] = hud.message.split('\n');
       ctx.font = 'bold 32px system-ui, sans-serif';
-      ctx.fillText(hud.message, W / 2, H * 0.3);
+      ctx.fillText(title, W / 2, H * 0.3);
+      ctx.font = '20px system-ui, sans-serif';
+      lines.forEach((line, i) => ctx.fillText(line, W / 2, H * 0.3 + 34 + i * 26));
     }
 
     if (!hud.locked) {

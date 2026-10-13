@@ -145,7 +145,7 @@ export interface Rotation {
 export type RiderEvent =
   | ({ type: 'land' } & Rotation)
   | ({ type: 'surface-spin' } & Rotation)
-  | { type: 'wipeout'; reason: WipeoutReason };
+  | { type: 'wipeout'; reason: WipeoutReason; details?: string[] };
 
 export const slopeAngle = (y: number) => SHEET.MAX_SLOPE * Math.pow(Math.max(0, y) / SHEET.LENGTH, 1.5);
 
@@ -180,6 +180,8 @@ const offAxis = (heading: number) => {
   const a = Math.abs(Math.atan2(Math.sin(heading), Math.cos(heading)));
   return Math.min(a, Math.PI - a);
 };
+
+const deg = (rad: number) => Math.round((rad * 180) / Math.PI);
 
 const halfTurns = (rad: number) => Math.round(Math.abs(rad) / Math.PI) / 2;
 
@@ -242,6 +244,7 @@ const acrossLean = (s: RiderState) => {
 export function stepRider(s: RiderState, input: RiderInput, dt: number, feet: FootSetup = DEFAULT_FEET): RiderEvent[] {
   if (s.wipeout) return [];
   const events: RiderEvent[] = [];
+  let landingFailures: string[] | undefined;
   const airborne = s.z > 0 || s.vz > 0;
 
   // 몸: 목표 하중을 스프링·감쇠로 따라간다
@@ -361,9 +364,18 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number, feet: Fo
       const footError = Math.abs(Math.abs(rel) - Math.PI / 2);
       // 보드가 다시 바로 서 있어야 한다 (뒤집혔거나 옆으로 섰으면 실패)
       const flipError = Math.abs(Math.atan2(Math.sin(s.flip), Math.cos(s.flip)));
-      const centered = Math.hypot(s.comDown, s.comSide) <= LAND_BALANCE_LIMIT;
-      if (footError > LAND_TOLERANCE || flipError > FLIP_LAND_TOLERANCE || !centered) {
+      const offCenter = Math.hypot(s.comDown, s.comSide);
+      const failures: string[] = [];
+      if (footError > LAND_TOLERANCE) failures.push(`발이 보드와 ${deg(footError)}° 어긋남 (허용 ${deg(LAND_TOLERANCE)}°)`);
+      if (flipError > FLIP_LAND_TOLERANCE) failures.push(`보드가 ${deg(flipError)}° 기울어 있음 (허용 ${deg(FLIP_LAND_TOLERANCE)}°)`);
+      if (offCenter > LAND_BALANCE_LIMIT) {
+        const dir =
+          Math.abs(s.comDown) >= Math.abs(s.comSide) ? (s.comDown > 0 ? '경사 아래' : '경사 위') : s.comSide > 0 ? '오른' : '왼';
+        failures.push(`무게중심이 ${dir}쪽으로 치우침 ${offCenter.toFixed(2)} (허용 ${LAND_BALANCE_LIMIT})`);
+      }
+      if (failures.length > 0) {
         s.wipeout = 'bad-landing';
+        landingFailures = failures;
       } else {
         s.stance = Math.sign(rel) * (Math.PI / 2);
         s.boardKicked = false;
@@ -395,6 +407,6 @@ export function stepRider(s: RiderState, input: RiderInput, dt: number, feet: Fo
   if (Math.hypot(s.comDown, s.comSide) > BALANCE_LIMIT) s.wipeout = 'off-balance';
   if (s.y > SHEET.LENGTH) s.wipeout = 'over-the-top';
 
-  if (s.wipeout) events.push({ type: 'wipeout', reason: s.wipeout });
+  if (s.wipeout) events.push({ type: 'wipeout', reason: s.wipeout, details: landingFailures });
   return events;
 }
